@@ -35,6 +35,13 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
     protected static final int DEFAULT_MAX_PENDING_TASKS = Math.max(16,
             SystemPropertyUtil.getInt("io.netty.eventLoop.maxPendingTasks", Integer.MAX_VALUE));
 
+    /**
+     * 尾部任务队列
+     *
+     * 尾部任务一般不常用，在普通任务执行完后 Reactor线程会执行尾部任务
+     * 使用场景：比如对Netty 的运行状态做一些统计数据，例如任务循环的耗时、占用物理内存的大小等等，
+     * 都可以向尾部队列添加一个收尾任务完成统计数据的实时更新。
+     * */
     private final Queue<Runnable> tailTasks;
 
     protected SingleThreadEventLoop(EventLoopGroup parent, ThreadFactory threadFactory, boolean addTaskWakesUp) {

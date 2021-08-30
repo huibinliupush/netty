@@ -126,10 +126,12 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
     protected final Runnable pollScheduledTask(long nanoTime) {
         assert inEventLoop();
 
+        //从定时队列中取出要执行的定时任务  deadline <= nanoTime
         ScheduledFutureTask<?> scheduledTask = peekScheduledTask();
         if (scheduledTask == null || scheduledTask.deadlineNanos() - nanoTime > 0) {
             return null;
         }
+        //符合取出条件 则取出
         scheduledTaskQueue.remove();
         scheduledTask.setConsumed();
         return scheduledTask;
@@ -251,17 +253,30 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
         scheduledTaskQueue().add(task.setId(++nextTaskId));
     }
 
+    /**
+     * 向Reactor线程添加定时任务
+     * 为保证线程安全性，只能在Reactor单线程中执行添加操作
+     * 1： 如果当前操作是在Reactor线程中 则直接放入 定时任务队列中
+     * 2： 如果当前操作是在外部线程中，则将定时任务包装成普通任务放入普通任务队列taskQueue中，
+     *     在普通任务中将定时任务放入定时任务队列中（Reactor线程执行）巧妙借助Mpsc Queue 解决外部线程添加定时任务的线程安全问题
+     *
+     * */
     private <V> ScheduledFuture<V> schedule(final ScheduledFutureTask<V> task) {
         if (inEventLoop()) {
             scheduleFromEventLoop(task);
         } else {
             final long deadlineNanos = task.deadlineNanos();
             // task will add itself to scheduled task queue when run if not expired
+            // 当向Reactor添加异步任务时  是否唤醒Reactor线程去执行 这时可能Reactor阻塞在Selector上
             if (beforeScheduledTaskSubmitted(deadlineNanos)) {
+                //将ScheduledFutureTask放入普通任务队列，用普通任务包装，在普通任务中 向 定时任务队列中添加定时任务
+                //io.netty.util.concurrent.ScheduledFutureTask.run
+                // 巧妙借助Mpsc Queue 解决外部线程添加定时任务的线程安全问题
                 execute(task);
             } else {
                 lazyExecute(task);
                 // Second hook after scheduling to facilitate race-avoidance
+                //在提交定时任务之后 Reactor线程是否应该唤醒
                 if (afterScheduledTaskSubmitted(deadlineNanos)) {
                     execute(WAKEUP_TASK);
                 }
@@ -282,6 +297,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
     }
 
     /**
+     * 当向Reactor添加异步任务时  是否唤醒Reactor线程去执行 这时可能Reactor阻塞在Selector上
      * Called from arbitrary non-{@link EventExecutor} threads prior to scheduled task submission.
      * Returns {@code true} if the {@link EventExecutor} thread should be woken immediately to
      * process the scheduled task (if not already awake).
@@ -299,6 +315,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
     }
 
     /**
+     * 在提交定时任务之后 Reactor线程是否应该唤醒
      * See {@link #beforeScheduledTaskSubmitted(long)}. Called only after that method returns false.
      *
      * @param deadlineNanos relative to {@link AbstractScheduledEventExecutor#nanoTime()}

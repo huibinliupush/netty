@@ -768,6 +768,13 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         }
     }
 
+    /**
+     * 这里是Netty能够保证对channel操作线程安全性的原因
+     * 如果对channel的write操作 发生在Reactor线程内部，则直接将write事件在pipeline中传播
+     * 如果是外部线程 则需要封装程writeTask 放入TaskQueue（Mpsc Queue） 等待Reactor线程处理
+     *
+     * 原则是 关于IO相关的操作 只能由 Reactor单线程处理 保证channel操作的线程安全性
+     * */
     private void write(Object msg, boolean flush, ChannelPromise promise) {
         ObjectUtil.checkNotNull(msg, "msg");
         try {
@@ -786,12 +793,14 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         final Object m = pipeline.touch(msg, next);
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
+            //Reactor线程内部 则直接操作
             if (flush) {
                 next.invokeWriteAndFlush(m, promise);
             } else {
                 next.invokeWrite(m, promise);
             }
         } else {
+            //外部线程 则需要将IO操作封装程writeTask 放入taskQueue 中转 等待Reactor线程最终执行
             final WriteTask task = WriteTask.newInstance(next, m, promise, flush);
             if (!safeExecute(executor, task, promise, m, !flush)) {
                 // We failed to submit the WriteTask. We need to cancel it so we decrement the pending bytes

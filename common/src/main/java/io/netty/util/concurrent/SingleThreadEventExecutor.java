@@ -84,7 +84,10 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private final CountDownLatch threadLock = new CountDownLatch(1);
     private final Set<Runnable> shutdownHooks = new LinkedHashSet<Runnable>();
+
+    //if and only if invocation of #addTask(Runnable) will wake up the executor thread
     private final boolean addTaskWakesUp;
+
     private final int maxPendingTasks;
     private final RejectedExecutionHandler rejectedExecutionHandler;
 
@@ -275,18 +278,25 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
     }
 
+    /**
+     * 从定时任务队列中取出达到deadline执行时间的定时任务
+     * 将定时任务 转存到 普通任务队列taskQueue中，统一由Reactor线程从taskQueue中取出执行
+     *
+     * */
     private boolean fetchFromScheduledTaskQueue() {
         if (scheduledTaskQueue == null || scheduledTaskQueue.isEmpty()) {
             return true;
         }
         long nanoTime = AbstractScheduledEventExecutor.nanoTime();
         for (;;) {
+            //从定时任务队列中取出到达执行deadline的定时任务  deadline <= nanoTime
             Runnable scheduledTask = pollScheduledTask(nanoTime);
             if (scheduledTask == null) {
                 return true;
             }
             if (!taskQueue.offer(scheduledTask)) {
                 // No space left in the task queue add it back to the scheduledTaskQueue so we pick it up again.
+                // taskQueue没有空间容纳 则在将定时任务重新塞进定时任务队列中等待下次执行
                 scheduledTaskQueue.add((ScheduledFutureTask<?>) scheduledTask);
                 return false;
             }
@@ -373,6 +383,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         boolean ranAtLeastOne = false;
 
         do {
+            //将到达执行时间的定时任务 转存到 普通任务队列taskQueue中，统一由Reactor线程从taskQueue中取出执行
             fetchedAll = fetchFromScheduledTaskQueue();
             if (runAllTasksFrom(taskQueue)) {
                 ranAtLeastOne = true;
@@ -382,6 +393,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         if (ranAtLeastOne) {
             lastExecutionTime = ScheduledFutureTask.nanoTime();
         }
+        //执行尾部队列任务
         afterRunningAllTasks();
         return ranAtLeastOne;
     }
@@ -461,10 +473,12 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         fetchFromScheduledTaskQueue();
         Runnable task = pollTask();
         if (task == null) {
+            //普通队列中没有任务时  执行队尾队列的任务
             afterRunningAllTasks();
             return false;
         }
 
+        //到达deadline，停止执行异步任务
         final long deadline = timeoutNanos > 0 ? ScheduledFutureTask.nanoTime() + timeoutNanos : 0;
         long runTasks = 0;
         long lastExecutionTime;
@@ -475,6 +489,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
             // Check timeout every 64 tasks because nanoTime() is relatively expensive.
             // XXX: Hard-coded value - will make it configurable if it is really a problem.
+            //没运行64个异步任务 检查一下 是否达到 执行deadline
             if ((runTasks & 0x3F) == 0) {
                 lastExecutionTime = ScheduledFutureTask.nanoTime();
                 if (lastExecutionTime >= deadline) {
@@ -825,8 +840,11 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private void execute(Runnable task, boolean immediate) {
         boolean inEventLoop = inEventLoop();
+        //addTaskWakesUp = true  addTask唤醒Reactor线程执行任务
         addTask(task);
         if (!inEventLoop) {
+            //如果当前线程不是Reactor线程，则启动Reactor线程
+            //这里可以看出Reactor线程的启动是通过 向NioEventLoop添加异步任务时启动的
             startThread();
             if (isShutdown()) {
                 boolean reject = false;
@@ -845,7 +863,15 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             }
         }
 
+        /**
+         * addTaskWakesUp = false 表示 调用addTask方法时 并不会唤醒Reactor线程
+         * addTaskWakesUp = true 表示 只有当调用addTask方法时 才会唤醒Reactor线程
+         *
+         * 这里表达的语义是，有异步任务提交并需要立即执行，必须要唤醒Reactor线程
+         * */
+
         if (!addTaskWakesUp && immediate) {
+            //io.netty.channel.nio.NioEventLoop.wakeup
             wakeup(inEventLoop);
         }
     }
@@ -973,6 +999,9 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         return false;
     }
 
+    /**
+     * 启动Reactor线程
+     * */
     private void doStartThread() {
         assert thread == null;
         executor.execute(new Runnable() {
@@ -986,6 +1015,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 boolean success = false;
                 updateLastExecutionTime();
                 try {
+                    //Reactor线程开始轮询
                     SingleThreadEventExecutor.this.run();
                     success = true;
                 } catch (Throwable t) {

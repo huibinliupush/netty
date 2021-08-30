@@ -23,6 +23,7 @@ import java.util.NoSuchElementException;
 
 final class SelectedSelectionKeySet extends AbstractSet<SelectionKey> {
 
+    //采用数组替换到JDK中的HashSet,这样add操作和遍历操作效率更高，不需要考虑hash冲突
     SelectionKey[] keys;
     int size;
 
@@ -35,7 +36,7 @@ final class SelectedSelectionKeySet extends AbstractSet<SelectionKey> {
         if (o == null) {
             return false;
         }
-
+        //时间复杂度O（1）
         keys[size++] = o;
         if (size == keys.length) {
             increaseCapacity();
@@ -59,6 +60,9 @@ final class SelectedSelectionKeySet extends AbstractSet<SelectionKey> {
         return size;
     }
 
+    /**
+     * 采用数组的遍历效率 高于 HashSet
+     * */
     @Override
     public Iterator<SelectionKey> iterator() {
         return new Iterator<SelectionKey>() {
