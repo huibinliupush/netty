@@ -81,8 +81,14 @@ public abstract class MultithreadEventLoopGroup extends MultithreadEventExecutor
     @Override
     protected abstract EventLoop newChild(Executor executor, Object... args) throws Exception;
 
+    /**
+     * Netty会在Reactor组中选择一个Reactor与channel绑定
+     * 之后Channel生命周期内的所有 I/O 事件都由这个 Reactor 负责处理，如 accept、connect、read、write 等 I/O 事件
+     * */
     @Override
     public ChannelFuture register(Channel channel) {
+        //在Reactor线程组EventLoopGroup中选择一个Reactor(EventLoop)将Channel注册其上,实现channel与Reactor的绑定
+        //一个channel只能绑定到一个EventLoop上，一个EventLoop负责监听多个channel
         return next().register(channel);
     }
 

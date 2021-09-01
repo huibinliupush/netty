@@ -49,16 +49,17 @@ public final class EchoServer {
         }
 
         // Configure the server.
+        //创建主从Reactor线程组
         EventLoopGroup bossGroup = new NioEventLoopGroup(1);
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         final EchoServerHandler serverHandler = new EchoServerHandler();
         try {
             ServerBootstrap b = new ServerBootstrap();
-            b.group(bossGroup, workerGroup)
-             .channel(NioServerSocketChannel.class)
-             .option(ChannelOption.SO_BACKLOG, 100)
-             .handler(new LoggingHandler(LogLevel.INFO))
-             .childHandler(new ChannelInitializer<SocketChannel>() {
+            b.group(bossGroup, workerGroup)//配置主从Reactor
+             .channel(NioServerSocketChannel.class)//配置主Reactor中的channel类型
+             .option(ChannelOption.SO_BACKLOG, 100)//设置主Reactor中channel的属性
+             .handler(new LoggingHandler(LogLevel.INFO))//设置主Reactor中Channel->pipline->handler
+             .childHandler(new ChannelInitializer<SocketChannel>() {//设置从Reactor中注册channel的pipeline
                  @Override
                  public void initChannel(SocketChannel ch) throws Exception {
                      ChannelPipeline p = ch.pipeline();
@@ -70,7 +71,7 @@ public final class EchoServer {
                  }
              });
 
-            // Start the server.
+            // Start the server. 绑定端口启动服务，开始监听accept事件
             ChannelFuture f = b.bind(PORT).sync();
 
             // Wait until the server socket is closed.

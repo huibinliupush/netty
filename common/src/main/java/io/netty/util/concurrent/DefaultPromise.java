@@ -445,6 +445,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     }
 
     /**
+     * 默认为GlobalEventExecutor
      * Get the executor used to notify listeners when this promise is complete.
      * <p>
      * It is assumed this executor will protect against {@link StackOverflowError} exceptions.

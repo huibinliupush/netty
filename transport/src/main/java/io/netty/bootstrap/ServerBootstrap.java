@@ -51,7 +51,9 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     private final Map<ChannelOption<?>, Object> childOptions = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> childAttrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
     private final ServerBootstrapConfig config = new ServerBootstrapConfig(this);
+    //Sub Reactor线程组
     private volatile EventLoopGroup childGroup;
+    //socketChannel中pipeline中的处理handler
     private volatile ChannelHandler childHandler;
 
     public ServerBootstrap() { }
@@ -129,7 +131,9 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
 
     @Override
     void init(Channel channel) {
+        //底层向JDK selectable channel设置socketOptions
         setChannelOptions(channel, newOptionsArray(), logger);
+        //向netty自定义的socketChannel设置attributes
         setAttributes(channel, attrs0().entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY));
 
         ChannelPipeline p = channel.pipeline();
@@ -142,15 +146,32 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         }
         final Entry<AttributeKey<?>, Object>[] currentChildAttrs = childAttrs.entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY);
 
+        //向ServerSocketChannel对应的pipeline中添加channelHandler -> ChannelInitializer
+        //在ServerSocketChannel注册成功后 在handlerAdded回调函数中初始化pipeline添加ServerBootstrapAcceptor
+        /**
+         * 为什么需要ChannelInitializer？
+         * 在channel初始化时，这时channel还没有注册到Selector上，还没有注册监听ACCEPT事件到Selector
+         * 所以事先添加了 ChannelInitializer 处理器，
+         * 等待 Channel 注册完成后，调用ChannelInitializer -> initChannel
+         * 再向 Pipeline 中添加 ServerBootstrapAcceptor 处理器。
+         *
+         * 因为添加 ServerBootstrapAcceptor 是一个异步过程，需要 EventLoop 线程负责执行。
+         * 而当前 EventLoop 线程正在执行 register0() 的注册流程，
+         * 所以等到 register0() 执行完之后才能被添加到 Pipeline 当中
+         * */
         p.addLast(new ChannelInitializer<Channel>() {
             @Override
             public void initChannel(final Channel ch) {
                 final ChannelPipeline pipeline = ch.pipeline();
+                //ServerBootstrap中用户指定的channelHandler
                 ChannelHandler handler = config.handler();
                 if (handler != null) {
                     pipeline.addLast(handler);
                 }
 
+                //最后添加ServerBootstrapAcceptor 用于accept事件的处理
+                //注意这里是提交给Reactor线程添加ServerBootstrapAcceptor（异步任务）
+                //执行完整个 register0() 的注册流程之后，EventLoop 线程会将 ServerBootstrapAcceptor 添加到 Pipeline 当中
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {

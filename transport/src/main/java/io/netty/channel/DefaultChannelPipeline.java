@@ -1331,6 +1331,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         @Override
         public void bind(
                 ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) {
+            //触发AbstractChannel->bind方法 执行JDK NIO SelectableChannel 执行底层绑定操作
             unsafe.bind(localAddress, promise);
         }
 
@@ -1359,6 +1360,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
         @Override
         public void read(ChannelHandlerContext ctx) {
+            //触发注册OP_ACCEPT或者OP_READ事件
             unsafe.beginRead();
         }
 
@@ -1393,10 +1395,16 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             }
         }
 
+        /**
+         * 1：ServerSocketChannel绑定成功后触发
+         *
+         * */
         @Override
         public void channelActive(ChannelHandlerContext ctx) {
+            //pipeline传播channelActive事件
             ctx.fireChannelActive();
-
+            //如果是autoRead 则自动触发read事件传播
+            //在read回调函数中 触发OP_ACCEPT注册
             readIfIsAutoRead();
         }
 
@@ -1419,6 +1427,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
         private void readIfIsAutoRead() {
             if (channel.config().isAutoRead()) {
+                //如果是autoRead 则触发read事件传播
                 channel.read();
             }
         }

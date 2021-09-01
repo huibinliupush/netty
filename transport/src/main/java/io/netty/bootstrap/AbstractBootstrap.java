@@ -56,15 +56,20 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     @SuppressWarnings("unchecked")
     static final Map.Entry<AttributeKey<?>, Object>[] EMPTY_ATTRIBUTE_ARRAY = new Map.Entry[0];
 
+    //Main Reactor线程组
     volatile EventLoopGroup group;
     @SuppressWarnings("deprecation")
+    //用于创建ServerSocketChannel  ReflectiveChannelFactory
     private volatile ChannelFactory<? extends C> channelFactory;
+    //服务端监听地址
     private volatile SocketAddress localAddress;
 
     // The order in which ChannelOptions are applied is important they may depend on each other for validation
     // purposes.
+    //serverSocketChannel中的选项和属性
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
+    //serverSocketChannel中pipeline里的handler(主要是acceptor)
     private volatile ChannelHandler handler;
 
     AbstractBootstrap() {
@@ -268,7 +273,15 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         return doBind(ObjectUtil.checkNotNull(localAddress, "localAddress"));
     }
 
+    /**
+     * 1：创建NioServerSocketChannel并初始化。
+     * 2：将NioServerSocketChannel注册到Main Reactor上的Selector中 此时监听事件为0 主要是为了获取SelectKey
+     * 3：注册成功后，通过回调执行localAddress的绑定。绑定成功后触发channelActive事件
+     * 4：在channelActive事件处理中，NioServerSocketChannel向Selector注册OP_ACCEPT事件开始监听客户端连接
+     *
+     * */
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        //异步创建，初始化，注册ServerSocketChannel
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
         if (regFuture.cause() != null) {
@@ -278,12 +291,15 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         if (regFuture.isDone()) {
             // At this point we know that the registration was complete and successful.
             ChannelPromise promise = channel.newPromise();
+            //注册完成后，serverSocketChannel绑定localAddress,触发channelActive事件
+            //最后向Selector注册OP_ACCEPT事件开始监听
             doBind0(regFuture, channel, localAddress, promise);
             return promise;
         } else {
             // Registration future is almost always fulfilled already, but just in case it's not.
             final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
             regFuture.addListener(new ChannelFutureListener() {
+                //io.netty.channel.AbstractChannel.AbstractUnsafe.register0 注册成功后 发起回调
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
                     Throwable cause = future.cause();
@@ -294,8 +310,15 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
                     } else {
                         // Registration was successful, so set the correct executor to use.
                         // See https://github.com/netty/netty/issues/2586
-                        promise.registered();
+                        /**
+                         * 1: GlobalEventExecutor to notify the returned ChannelFuture if the registration is not done yet.
+                         * 2：completes successful we should just notify with the EventLoop of the Channel.
+                         * */
 
+                        //当promise完成的时候，设置channel对应的Reactor作为通知 promise listeners的executor
+                        promise.registered();
+                        //注册完成后，serverSocketChannel绑定localAddress,触发channelActive事件
+                        //最后向Selector注册OP_ACCEPT事件开始监听
                         doBind0(regFuture, channel, localAddress, promise);
                     }
                 }
@@ -307,7 +330,10 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            //创建NioServerSocketChannel
+            //ReflectiveChannelFactory通过泛型，反射，工厂的方式灵活创建不同类型的channel
             channel = channelFactory.newChannel();
+            //初始化NioServerSocketChannel
             init(channel);
         } catch (Throwable t) {
             if (channel != null) {
@@ -320,6 +346,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
 
+        //向MainReactor注册ServerSocketChannel
         ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
@@ -349,6 +376,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
+        // 绑定操作 也需要在 Reactor中执行 ServerSocketChannel -> bind
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {

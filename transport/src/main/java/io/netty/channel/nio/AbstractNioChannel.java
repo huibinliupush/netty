@@ -50,8 +50,11 @@ public abstract class AbstractNioChannel extends AbstractChannel {
     private static final InternalLogger logger =
             InternalLoggerFactory.getInstance(AbstractNioChannel.class);
 
+    //JDK NIO原生Selectable Channel
     private final SelectableChannel ch;
+    // Channel监听事件集合
     protected final int readInterestOp;
+    //channel注册到Selector后获得的SelectKey
     volatile SelectionKey selectionKey;
     boolean readPending;
     private final Runnable clearReadPendingRunnable = new Runnable() {
@@ -81,6 +84,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         this.ch = ch;
         this.readInterestOp = readInterestOp;
         try {
+            //设置Channel为非阻塞 配合IO多路复用模型
             ch.configureBlocking(false);
         } catch (IOException e) {
             try {
@@ -377,6 +381,16 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         boolean selected = false;
         for (;;) {
             try {
+                /**
+                 * 这里主要是为了获取channel注册后对应的selectionKey，注意这里注册的监听事件为0
+                 * 对于ServerSocketChannel来说 在bind操作成功后 才会去注册OP_ACCEPT事件
+                 * 对于SocketChannel来说，在注册成功后 就会去注册OP_READ事件
+                 *
+                 * 同时这里也是Netty自定义的channel和JDK NIO中的SelectableChannel关联的地方，将netty自定义的channel对象
+                 * 附着在selectionKey的attechment属性上，这样在每次 Selector 对象进行事件循环时，
+                 * Netty 都可以从返回的 JDK 底层 Channel 中获得自己的 Channel 对象
+                 *
+                 * */
                 selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
                 return;
             } catch (CancelledKeyException e) {
@@ -410,7 +424,12 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         readPending = true;
 
         final int interestOps = selectionKey.interestOps();
+        /**
+         * 1：ServerSocketChannel 初始化时 readInterestOp设置的是OP_ACCEPT事件
+         * 2：SocketChannel 初始化时 readInterestOp设置的是OP_READ事件
+         * */
         if ((interestOps & readInterestOp) == 0) {
+            //注册监听OP_ACCEPT或者OP_READ事件
             selectionKey.interestOps(interestOps | readInterestOp);
         }
     }
