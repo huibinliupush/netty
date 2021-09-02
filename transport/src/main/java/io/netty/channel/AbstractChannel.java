@@ -530,18 +530,24 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                  * */
                 pipeline.invokeHandlerAddedIfNeeded();
 
-                //notify promise 回调io.netty.bootstrap.AbstractBootstrap.doBind -> regFuture 执行bind操作
+                /**
+                 * 服务端ServerSocketChannel注册成功后 会走这里safeSetSuccess
+                 * notify promise 回调io.netty.bootstrap.AbstractBootstrap.doBind -> regFuture 执行bind操作
+                 * */
                 safeSetSuccess(promise);
                 //触发channelRegister事件
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
                 // multiple channel actives if the channel is deregistered and re-registered.
                 /**
-                 * 对于ServerSocketChannel来说 只有bind成功后 channel的状态才是active的，所以这里的isActive()是false
+                 * 对于服务端ServerSocketChannel来说 只有bind成功后 channel的状态才是active的，所以这里的isActive()是false
                  *
-                 * 对于普通SocketChannel来说，主要用来处理读写事件，当channel注册成功后 channel就是active了 所以这里的isActive()是true
+                 * 对于客户端SocketChannel来说，主要用来处理读写事件，当channel注册成功后 channel就是active了 所以这里的isActive()是true
                  * */
                 if (isActive()) {
+                    /**
+                     * 客户端SocketChannel注册成功后会走这里，在channelActive事件回调中注册OP_READ事件
+                     * */
                     if (firstRegistration) {
                         //触发channelActive事件
                         pipeline.fireChannelActive();

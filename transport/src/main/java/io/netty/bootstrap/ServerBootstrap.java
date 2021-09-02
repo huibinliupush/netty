@@ -230,12 +230,18 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
             final Channel child = (Channel) msg;
 
+            //初始化客户端SocketChannel
             child.pipeline().addLast(childHandler);
 
             setChannelOptions(child, childOptions, logger);
             setAttributes(child, childAttrs);
 
             try {
+                /**
+                 * 1：在Sub Reactor线程组中选择一个Reactor绑定
+                 * 2：将客户端SocketChannel注册到绑定的Reactor上
+                 * 3：SocketChannel注册到sub reactor中的selector上，并监听OP_READ事件
+                 * */
                 childGroup.register(child).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {

@@ -57,13 +57,17 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
 
     private final class NioMessageUnsafe extends AbstractNioUnsafe {
 
+        //存放连接建立后，在acceptor中创建的客户端SocketChannel
         private final List<Object> readBuf = new ArrayList<Object>();
 
         @Override
         public void read() {
+            //必须在Reactor线程中执行
             assert eventLoop().inEventLoop();
+            //注意下面的config和pipeline都是服务端ServerSocketChannel中的
             final ChannelConfig config = config();
             final ChannelPipeline pipeline = pipeline();
+            //创建接收数据Buffer分配器（用于分配容量大小合适的byteBuffer用来容纳接收数据）
             final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
             allocHandle.reset(config);
 
@@ -72,6 +76,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
             try {
                 try {
                     do {
+                        //底层调用NioServerSocketChannel->doReadMessages 创建客户端SocketChannel
                         int localRead = doReadMessages(readBuf);
                         if (localRead == 0) {
                             break;
@@ -80,7 +85,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                             closed = true;
                             break;
                         }
-
+                        //统计在当前事件循环中已经读取到得Message数量（创建连接的个数）
                         allocHandle.incMessagesRead(localRead);
                     } while (allocHandle.continueReading());
                 } catch (Throwable t) {
@@ -90,10 +95,15 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 int size = readBuf.size();
                 for (int i = 0; i < size; i ++) {
                     readPending = false;
+                    //NioServerSocketChannel对应的pipeline中传播read事件
+                    //io.netty.bootstrap.ServerBootstrap.ServerBootstrapAcceptor.channelRead
+                    //初始化客户端SocketChannel，并将其绑定到Sub Reactor线程组中的一个Reactor上
                     pipeline.fireChannelRead(readBuf.get(i));
                 }
+                //清除本次accept 创建的客户端SocketChannel集合
                 readBuf.clear();
                 allocHandle.readComplete();
+                //触发readComplete事件传播
                 pipeline.fireChannelReadComplete();
 
                 if (exception != null) {
