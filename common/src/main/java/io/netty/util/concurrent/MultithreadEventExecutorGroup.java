@@ -30,10 +30,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public abstract class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
 
+    //Reactor线程组中的Reactor集合
     private final EventExecutor[] children;
     private final Set<EventExecutor> readonlyChildren;
+    //记录关闭的Reactor个数，当Reactor全部关闭后，才可以认为关闭成功
     private final AtomicInteger terminatedChildren = new AtomicInteger();
+    //关闭future
     private final Promise<?> terminationFuture = new DefaultPromise(GlobalEventExecutor.INSTANCE);
+    //从Reactor集合中选择一个特定的Reactor的选择策略 用于channel注册绑定到一个固定的Reactor上
     private final EventExecutorChooserFactory.EventExecutorChooser chooser;
 
     /**
@@ -73,11 +77,12 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         }
 
         if (executor == null) {
+            //用于创建Reactor线程
             executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
         }
 
         children = new EventExecutor[nThreads];
-
+        //创建Reactor
         for (int i = 0; i < nThreads; i ++) {
             boolean success = false;
             try {
@@ -114,6 +119,7 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
             @Override
             public void operationComplete(Future<Object> future) throws Exception {
                 if (terminatedChildren.incrementAndGet() == children.length) {
+                    //当所有Reactor关闭后 才认为是关闭成功
                     terminationFuture.setSuccess(null);
                 }
             }
