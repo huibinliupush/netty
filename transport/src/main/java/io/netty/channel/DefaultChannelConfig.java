@@ -54,9 +54,11 @@ public class DefaultChannelConfig implements ChannelConfig {
             AtomicReferenceFieldUpdater.newUpdater(
                     DefaultChannelConfig.class, WriteBufferWaterMark.class, "writeBufferWaterMark");
 
+    //ChannelConfig对应的channel
     protected final Channel channel;
 
     private volatile ByteBufAllocator allocator = ByteBufAllocator.DEFAULT;
+    //用于Channel接收数据用的buffer分配器
     private volatile RecvByteBufAllocator rcvBufAllocator;
     private volatile MessageSizeEstimator msgSizeEstimator = DEFAULT_MSG_SIZE_ESTIMATOR;
 

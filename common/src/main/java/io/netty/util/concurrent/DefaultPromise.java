@@ -482,6 +482,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     }
 
     private void notifyListeners() {
+        //这里的executor是Reactor线程，在创建regFuture时指定
         EventExecutor executor = executor();
         if (executor.inEventLoop()) {
             final InternalThreadLocalMap threadLocals = InternalThreadLocalMap.get();
@@ -614,6 +615,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         if (RESULT_UPDATER.compareAndSet(this, null, objResult) ||
             RESULT_UPDATER.compareAndSet(this, UNCANCELLABLE, objResult)) {
             if (checkNotifyWaiters()) {
+                //回调注册在promise上的listeners
                 notifyListeners();
             }
             return true;

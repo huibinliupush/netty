@@ -1401,7 +1401,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
          * */
         @Override
         public void channelActive(ChannelHandlerContext ctx) {
-            //pipeline传播channelActive事件
+            //pipeline中继续向后传播channelActive事件
             ctx.fireChannelActive();
             //如果是autoRead 则自动触发read事件传播
             //在read回调函数中 触发OP_ACCEPT注册

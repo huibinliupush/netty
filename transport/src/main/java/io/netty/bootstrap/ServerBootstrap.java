@@ -48,7 +48,9 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
 
     // The order in which child ChannelOptions are applied is important they may depend on each other for validation
     // purposes.
+    //客户端SocketChannel对应的ChannelOption配置
     private final Map<ChannelOption<?>, Object> childOptions = new LinkedHashMap<ChannelOption<?>, Object>();
+    //客户端SocketChannel对应的属性配置
     private final Map<AttributeKey<?>, Object> childAttrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
     private final ServerBootstrapConfig config = new ServerBootstrapConfig(this);
     //Sub Reactor线程组
@@ -82,6 +84,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
      * {@link Channel}'s.
      */
     public ServerBootstrap group(EventLoopGroup parentGroup, EventLoopGroup childGroup) {
+        //父类管理主Reactor线程组
         super.group(parentGroup);
         if (this.childGroup != null) {
             throw new IllegalStateException("childGroup set already");
@@ -131,15 +134,19 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
 
     @Override
     void init(Channel channel) {
-        //底层向JDK selectable channel设置socketOptions
+        //向NioServerSocketChannelConfig设置ServerSocketChannelOption
         setChannelOptions(channel, newOptionsArray(), logger);
-        //向netty自定义的socketChannel设置attributes
+        //向netty自定义的NioServerSocketChannel设置attributes
         setAttributes(channel, attrs0().entrySet().toArray(EMPTY_ATTRIBUTE_ARRAY));
 
         ChannelPipeline p = channel.pipeline();
 
+        //获取从Reactor线程组
         final EventLoopGroup currentChildGroup = childGroup;
+        //获取用于初始化客户端NioSocketChannel的ChannelInitializer
         final ChannelHandler currentChildHandler = childHandler;
+
+        //获取用户配置的客户端SocketChannel的channelOption以及attributes
         final Entry<ChannelOption<?>, Object>[] currentChildOptions;
         synchronized (childOptions) {
             currentChildOptions = childOptions.entrySet().toArray(EMPTY_OPTION_ARRAY);
@@ -150,14 +157,20 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         //在ServerSocketChannel注册成功后 在handlerAdded回调函数中初始化pipeline添加ServerBootstrapAcceptor
         /**
          * 为什么需要ChannelInitializer？
-         * 在channel初始化时，这时channel还没有注册到Selector上，还没有注册监听ACCEPT事件到Selector
+         *
+         * 1： 为了保证线程安全初始化pipeline的动作需要由Reactor线程进行，当前线程是用户的启动Main线程 并不是Reactor线程
+         * 2： 在channel初始化时，这时channel还没有注册到Selector上，还没有注册监听ACCEPT事件到Selector
          * 所以事先添加了 ChannelInitializer 处理器，
          * 等待 Channel 注册完成后，调用ChannelInitializer -> initChannel
          * 再向 Pipeline 中添加 ServerBootstrapAcceptor 处理器。
          *
-         * 因为添加 ServerBootstrapAcceptor 是一个异步过程，需要 EventLoop 线程负责执行。
-         * 而当前 EventLoop 线程正在执行 register0() 的注册流程，
-         * 所以等到 register0() 执行完之后才能被添加到 Pipeline 当中
+         * 此时执行线程已经是Reactor线程为什么不直接添加acceptor 而是封装程异步任务？。
+         *
+         * 1：当注册完成后触发hanlderAdded回调 执行initChannel时 这时线程为Reactor线程
+         * 而当前 Reactor 线程正在执行 register0() 方法，regFuture中得回调 执行绑定操作（也是异步任务），
+         * 所以等到 register0() 执行完之后才能被添加到 Pipeline 当中,
+         * (创建Acceptor封装成异步任务存储在taskQueue中，等待Reactor线程执行完register0注册流程，然后执行异步任务)
+         *
          * */
         p.addLast(new ChannelInitializer<Channel>() {
             @Override

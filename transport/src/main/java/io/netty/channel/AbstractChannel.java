@@ -43,7 +43,7 @@ import java.util.concurrent.RejectedExecutionException;
 public abstract class AbstractChannel extends DefaultAttributeMap implements Channel {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannel.class);
-
+    //channel是由创建层次的，比如ServerSocketChannel 是 SocketChannel的 parent
     private final Channel parent;
     //channel全局唯一ID machineId+processId+sequence+timestamp+random
     private final ChannelId id;
@@ -252,7 +252,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
     @Override
     public ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise) {
-        //触发pipeline bind回调 首先执行HeadContext->bind
+        //触发pipeline bind回调
+        //bind事件被定义为outbound行为，在pipeline中反向传播  tail -> loggingHandler -> head
         return pipeline.bind(localAddress, promise);
     }
 
@@ -541,6 +542,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 // multiple channel actives if the channel is deregistered and re-registered.
                 /**
                  * 对于服务端ServerSocketChannel来说 只有bind成功后 channel的状态才是active的，所以这里的isActive()是false
+                 * 因为doBind绑定操作被封装成异步任务在taskQueue中存储，需要等待当前Reactor线程执行完register0才能执行。
                  *
                  * 对于客户端SocketChannel来说，主要用来处理读写事件，当channel注册成功后 channel就是active了 所以这里的isActive()是true
                  * */
@@ -610,6 +612,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 });
             }
 
+            //执行promise上注册的Listener
             safeSetSuccess(promise);
         }
 

@@ -74,6 +74,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
         }
     }
 
+    //ServerSocketChannel相关的配置
     private final ServerSocketChannelConfig config;
 
     /**

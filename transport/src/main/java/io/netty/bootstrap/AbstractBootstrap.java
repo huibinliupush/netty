@@ -66,10 +66,11 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     // The order in which ChannelOptions are applied is important they may depend on each other for validation
     // purposes.
-    //serverSocketChannel中的选项和属性
+    //serverSocketChannel中的ChannelOption配置
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
     //serverSocketChannel中pipeline里的handler(主要是acceptor)
+    //只能向serverSocketChannel中添加一个自定义ChannelHandler
     private volatile ChannelHandler handler;
 
     AbstractBootstrap() {
@@ -269,7 +270,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      * Create a new {@link Channel} and bind it.
      */
     public ChannelFuture bind(SocketAddress localAddress) {
+        //校验Netty核心组件是否配置齐全
         validate();
+        //服务端开始启动，绑定端口地址，接收客户端连接
         return doBind(ObjectUtil.checkNotNull(localAddress, "localAddress"));
     }
 
@@ -377,6 +380,20 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
         // 绑定操作 也需要在 Reactor中执行 ServerSocketChannel -> bind
+        /**
+         * 其实此时执行线程已经是`Reactor线程`了，那为什么不直接执行而是封装成异步任务？？
+         *
+         * 注意当前Reactor的taskQueue中已经有添加acceptor的任务了。
+         *
+         * 因为执行到这里 是因为`Reactor线程`在执行register0注册流程的时候 doReagister执行完毕 回调regFuture过来的。
+         * 现在需要Reactor线程尽快将register0流程走完，然后执行taskQueue中的任务。
+         *
+         * register0注册流程完毕后执行异步任务
+         *
+         * 1: 添加acceptro
+         * 2: doBind
+         * */
+
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {
