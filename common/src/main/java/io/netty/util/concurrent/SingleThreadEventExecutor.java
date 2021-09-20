@@ -89,6 +89,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     private final Set<Runnable> shutdownHooks = new LinkedHashSet<Runnable>();
 
     //if and only if invocation of #addTask(Runnable) will wake up the executor thread
+    //初始化为false
     private final boolean addTaskWakesUp;
 
     private final int maxPendingTasks;
@@ -176,7 +177,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                                         boolean addTaskWakesUp, Queue<Runnable> taskQueue, RejectedExecutionHandler rejectedHandler) {
         //parent为Reactor所属的NioEventLoopGroup Reactor线程组
         super(parent);
-        //向Reactor添加任务时，是否唤醒Selector停止轮询IO就绪事件，马上执行异步任务
+        //向Reactor添加任务时，是否唤醒Selector停止轮询IO就绪事件，马上执行异步任务 初始化为false
         this.addTaskWakesUp = addTaskWakesUp;
         //Reactor异步任务队列的大小
         this.maxPendingTasks = DEFAULT_MAX_PENDING_EXECUTOR_TASKS;
@@ -300,6 +301,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         if (scheduledTaskQueue == null || scheduledTaskQueue.isEmpty()) {
             return true;
         }
+
         long nanoTime = AbstractScheduledEventExecutor.nanoTime();
         for (;;) {
             //从定时任务队列中取出到达执行deadline的定时任务  deadline <= nanoTime
@@ -502,7 +504,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
             // Check timeout every 64 tasks because nanoTime() is relatively expensive.
             // XXX: Hard-coded value - will make it configurable if it is really a problem.
-            //没运行64个异步任务 检查一下 是否达到 执行deadline
+            //每运行64个异步任务 检查一下 是否达到 执行deadline
             if ((runTasks & 0x3F) == 0) {
                 lastExecutionTime = ScheduledFutureTask.nanoTime();
                 if (lastExecutionTime >= deadline) {
@@ -877,8 +879,12 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
 
         /**
-         * addTaskWakesUp = false 表示 调用addTask方法时 并不会唤醒Reactor线程
-         * addTaskWakesUp = true 表示 只有当调用addTask方法时 才会唤醒Reactor线程
+         * addTaskWakesUp = true 表示 当且仅当只有调用addTask方法时 才会唤醒Reactor线程
+         *
+         * addTaskWakesUp = false 表示 并不是只有addTask方法才能唤醒Reactor 还有其他方法可以唤醒Reactor 默认设置 false
+         *
+         * 比如这里的execute方法，当immediate参数为true的时候表示需要立即执行,addTaskWakesUp 默认设置为false 表示不仅只有addTask可以唤醒Reactor
+         * 还有其他方法可以唤醒
          *
          * 这里表达的语义是，有异步任务提交并需要立即执行，必须要唤醒Reactor线程
          * */

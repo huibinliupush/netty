@@ -192,7 +192,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         if (DISABLE_KEY_SET_OPTIMIZATION) {
-            //Selector优化开关 默认关闭， 采用JDK NIO原生Selector
+            //采用JDK NIO原生Selector  Selector优化开关 默认开启，
             return new SelectorTuple(unwrappedSelector);
         }
 
