@@ -86,8 +86,11 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
      */
     public abstract class MaxMessageHandle implements ExtendedHandle {
         private ChannelConfig config;
+        //每次事件轮询时，最多读取16次
         private int maxMessagePerRead;
+        //本次事件轮询总共读取的message数
         private int totalMessages;
+        //本次事件轮询总共读取的字节数
         private int totalBytesRead;
         private int attemptedBytesRead;
         private int lastBytesRead;
@@ -105,6 +108,7 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
         @Override
         public void reset(ChannelConfig config) {
             this.config = config;
+            //默认每次最多读取16次
             maxMessagePerRead = maxMessagesPerRead();
             totalMessages = totalBytesRead = 0;
         }

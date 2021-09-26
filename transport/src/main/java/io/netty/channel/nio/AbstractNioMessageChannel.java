@@ -68,6 +68,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
             final ChannelConfig config = config();
             final ChannelPipeline pipeline = pipeline();
             //创建接收数据Buffer分配器（用于分配容量大小合适的byteBuffer用来容纳接收数据）
+            //AdaptiveRecvByteBufAllocator->MaxMessageHandle
             final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
             allocHandle.reset(config);
 
@@ -88,6 +89,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                         //统计在当前事件循环中已经读取到得Message数量（创建连接的个数）
                         allocHandle.incMessagesRead(localRead);
                     } while (allocHandle.continueReading());
+
                 } catch (Throwable t) {
                     exception = t;
                 }
@@ -102,6 +104,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 }
                 //清除本次accept 创建的客户端SocketChannel集合
                 readBuf.clear();
+                //统计本次读取数据的容量，适当的对buffer进行扩容缩容
                 allocHandle.readComplete();
                 //触发readComplete事件传播
                 pipeline.fireChannelReadComplete();

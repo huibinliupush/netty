@@ -461,49 +461,49 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         /**
          * 注册Channel到绑定的Reactor上
          * */
-        @Override
-        public final void register(EventLoop eventLoop, final ChannelPromise promise) {
-            ObjectUtil.checkNotNull(eventLoop, "eventLoop");
-            if (isRegistered()) {
-                promise.setFailure(new IllegalStateException("registered to an event loop already"));
-                return;
-            }
-            //EventLoop的类型要与Channel的类型一样  Nio Oio Aio
-            if (!isCompatible(eventLoop)) {
-                promise.setFailure(
-                        new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
-                return;
-            }
+            @Override
+            public final void register(EventLoop eventLoop, final ChannelPromise promise) {
+                ObjectUtil.checkNotNull(eventLoop, "eventLoop");
+                if (isRegistered()) {
+                    promise.setFailure(new IllegalStateException("registered to an event loop already"));
+                    return;
+                }
+                //EventLoop的类型要与Channel的类型一样  Nio Oio Aio
+                if (!isCompatible(eventLoop)) {
+                    promise.setFailure(
+                            new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
+                    return;
+                }
 
-            //在channel上设置绑定的Reactor
-            AbstractChannel.this.eventLoop = eventLoop;
+                //在channel上设置绑定的Reactor
+                AbstractChannel.this.eventLoop = eventLoop;
 
-            /**
-             * 执行channel注册的操作必须是Reactor线程来完成
-             *
-             * 1: 如果当前执行线程是Reactor线程，则直接执行register0进行注册
-             * 2：如果当前执行线程是外部线程，则需要将register0注册操作 封装程异步Task 由Reactor线程执行
-             * */
-            if (eventLoop.inEventLoop()) {
-                register0(promise);
-            } else {
-                try {
-                    eventLoop.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            register0(promise);
-                        }
-                    });
-                } catch (Throwable t) {
-                    logger.warn(
-                            "Force-closing a channel whose registration task was not accepted by an event loop: {}",
-                            AbstractChannel.this, t);
-                    closeForcibly();
-                    closeFuture.setClosed();
-                    safeSetFailure(promise, t);
+                /**
+                 * 执行channel注册的操作必须是Reactor线程来完成
+                 *
+                 * 1: 如果当前执行线程是Reactor线程，则直接执行register0进行注册
+                 * 2：如果当前执行线程是外部线程，则需要将register0注册操作 封装程异步Task 由Reactor线程执行
+                 * */
+                if (eventLoop.inEventLoop()) {
+                    register0(promise);
+                } else {
+                    try {
+                        eventLoop.execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                register0(promise);
+                            }
+                        });
+                    } catch (Throwable t) {
+                        logger.warn(
+                                "Force-closing a channel whose registration task was not accepted by an event loop: {}",
+                                AbstractChannel.this, t);
+                        closeForcibly();
+                        closeFuture.setClosed();
+                        safeSetFailure(promise, t);
+                    }
                 }
             }
-        }
 
         private void register0(ChannelPromise promise) {
             try {

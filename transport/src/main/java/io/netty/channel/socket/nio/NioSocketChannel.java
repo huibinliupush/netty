@@ -465,6 +465,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     private final class NioSocketChannelConfig extends DefaultSocketChannelConfig {
+        //293976
         private volatile int maxBytesPerGatheringWrite = Integer.MAX_VALUE;
         private NioSocketChannelConfig(NioSocketChannel channel, Socket javaSocket) {
             super(channel, javaSocket);
@@ -517,6 +518,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
         private void calculateMaxBytesPerGatheringWrite() {
             // Multiply by 2 to give some extra space in case the OS can process write data faster than we can provide.
+            // 293976 = 146988 << 2
             int newSendBufferSize = getSendBufferSize() << 1;
             if (newSendBufferSize > 0) {
                 setMaxBytesPerGatheringWrite(newSendBufferSize);

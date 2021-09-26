@@ -141,12 +141,14 @@ public class AdaptiveRecvByteBufAllocator extends DefaultMaxMessagesRecvByteBufA
 
         @Override
         public void readComplete() {
-            record(totalBytesRead());
+                record(totalBytesRead());
         }
     }
-
+    //默认64
     private final int minIndex;
+    //2048
     private final int maxIndex;
+    //65535
     private final int initial;
 
     /**
