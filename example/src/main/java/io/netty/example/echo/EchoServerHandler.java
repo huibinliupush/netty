@@ -27,12 +27,13 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        //此处的msg就是Netty在read loop中从NioSocketChannel中读取到ByteBuffer
         ctx.write(msg);
     }
 
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) {
-
+        //本次OP_READ事件处理完毕
         ctx.flush();
     }
 

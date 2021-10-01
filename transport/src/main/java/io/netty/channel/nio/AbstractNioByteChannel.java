@@ -139,16 +139,29 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 return;
             }
             final ChannelPipeline pipeline = pipeline();
+            //PooledByteBufAllocator ByteBuf具体的分配器
             final ByteBufAllocator allocator = config.getAllocator();
+            //自适应ByteBuf分配器 AdaptiveRecvByteBufAllocator 需要与具体的ByteBuf分配器配合使用 比如这里的PooledByteBufAllocator
             final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
+            //allocHandler用于统计每次读取数据的大小，方便下次分配合适大小的ByteBuf
             allocHandle.reset(config);
+
+            /**
+             * AdaptiveRecvByteBufAllocator 只负责调整分配给recvbuf的容量大小，里边保存的属性全部是统计每次recvbuf读取数据的容量变化
+             *
+             * PooledByteBufAllocator 是具体负责分配recvbuf内存的，容量由AdaptiveRecvByteBufAllocator决定
+             * */
 
             ByteBuf byteBuf = null;
             boolean close = false;
             try {
                 do {
+                    //利用PooledByteBufAllocator分配合适大小的byteBuf 初始大小为2048
+                    //每一轮开始读取之前 都需要为每一轮分配独立的堆外内存 不能共用
                     byteBuf = allocHandle.allocate(allocator);
+                    //记录本次读取了多少字节数
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
+                    //如果本次没有读取到任何字节，则退出循环 进行下一轮事件轮询
                     if (allocHandle.lastBytesRead() <= 0) {
                         // nothing was read. release the buffer.
                         byteBuf.release();
@@ -161,13 +174,20 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                         break;
                     }
 
+                    //增加读取的message数量 这里表示读取的次数
                     allocHandle.incMessagesRead(1);
                     readPending = false;
+                    //客户端NioSocketChannel的pipeline中触发ChannelRead事件
                     pipeline.fireChannelRead(byteBuf);
+                    //下一轮读取开始重新分配内存 缓存下一轮的数据，本次读取的堆外内存继续在pipeline中传递处理
+                    // channelHandler有可能是线程池处理 fireChannelRead立马返回，所以byteBuf每轮都应该是独立的不能共用
                     byteBuf = null;
                 } while (allocHandle.continueReading());
 
+                //统计本次recvbuf读取容量情况，决定下次是否扩容或者缩容
                 allocHandle.readComplete();
+                //在NioSocketChannel的pipeline中触发ChannelReadComplete事件，表示一次read事件处理完毕
+                //但这并不表示 客户端发送来的数据已经全部读完，因为如果数据太多的话，这里只会读取16次，剩下的会等到下次read事件到来后在处理
                 pipeline.fireChannelReadComplete();
 
                 if (close) {

@@ -57,6 +57,7 @@ public class DefaultChannelConfig implements ChannelConfig {
     //ChannelConfig对应的channel
     protected final Channel channel;
 
+    //PooledByteBufAllocator
     private volatile ByteBufAllocator allocator = ByteBufAllocator.DEFAULT;
     //用于Channel接收数据用的buffer分配器  NioServerSocketChannel对应的是AdaptiveRecvByteBufAllocator
     private volatile RecvByteBufAllocator rcvBufAllocator;

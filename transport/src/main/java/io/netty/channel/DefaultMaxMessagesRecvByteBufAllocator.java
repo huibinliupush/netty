@@ -92,12 +92,15 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
         private int totalMessages;
         //本次事件轮询总共读取的字节数
         private int totalBytesRead;
+        //表示本次read loop 尝试读取多少字节，byteBuffer剩余可写的字节数
         private int attemptedBytesRead;
+        //本次read loop读取到的字节数
         private int lastBytesRead;
         private final boolean respectMaybeMoreData = DefaultMaxMessagesRecvByteBufAllocator.this.respectMaybeMoreData;
         private final UncheckedBooleanSupplier defaultMaybeMoreSupplier = new UncheckedBooleanSupplier() {
             @Override
             public boolean get() {
+                //判断本次读取byteBuffer是否满载而归
                 return attemptedBytesRead == lastBytesRead;
             }
         };
@@ -141,6 +144,19 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
             return continueReading(defaultMaybeMoreSupplier);
         }
 
+        /**
+         * 是否继续进行read loop需要同时满足以下几个条件
+         * 1： 本次read loop 确实读到了数据 totalBytesRead > 0
+         * 2： 最多只能读取16次
+         * 3： 可能还有数据
+         *
+         * 对于可能还有数据的处理方式 netty中通过respectMaybeMoreData字段控制 默认为true
+         * respectMaybeMoreData = true 表示 要对可能还有更多数据进行处理的这种情况要respect认真对待
+         * 如果本次循环读取到的数据已经装满recvBuf，表示后面可能还有数据，那么就要进行读取。读不到退出循环
+         *
+         * respectMaybeMoreData = false 表示 对可能还有更过数据的这种情况 不认真对待 not respect
+         * 不管本次循环读取数据是否满载而归，都要继续进行读取，直到读取不到数据 退出循环
+         * */
         @Override
         public boolean continueReading(UncheckedBooleanSupplier maybeMoreDataSupplier) {
             return config.isAutoRead() &&
