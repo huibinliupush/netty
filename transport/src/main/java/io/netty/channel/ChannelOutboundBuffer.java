@@ -30,6 +30,7 @@ import io.netty.util.internal.PromiseNotificationUtil;
 import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+import org.openjdk.jol.info.ClassLayout;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
@@ -54,11 +55,27 @@ import static java.lang.Math.min;
 public final class ChannelOutboundBuffer {
     // Assuming a 64-bit JVM:
     //  - 16 bytes object header
-    //  - 6 reference fields
-    //  - 2 long fields
-    //  - 2 int fields
-    //  - 1 boolean field
-    //  - padding
+    //  - 6 reference fields 6 * 4 bytes
+    //  - 2 long fields 2 * 8 bytes
+    //  - 2 int fields 2 * 4 bytes
+    //  - 1 boolean field 1 * 1 bytes
+    //  以上是Entry对象在内存中的占用情况 总共89字节 不考虑指针压缩
+    //  - padding  7bytes  89 + 7 = 96 这样可以使得entry对象在堆中的大小为8的整数倍
+
+    //对象由 对象头 + 实例数据 + padding填充字节组成，虚拟机规范要求对象所占内存必须是8的倍数，padding就是干这个的
+
+    /**
+     *
+     * 假设在 64 位操作系统下，且没有使用各种压缩选项的情况。对象头的长度占 16 字节；
+     * 引用属性占 8 字节；long 类型占 8 字节；int 类型占 4 字节；boolean 类型占 1 字节。
+     * 同时，由于 HotSpot VM 的自动内存管理系统要求对象起始地址必须是 8 字节的整数倍，
+     * 也就是说对象的大小必须是 8 字节的整数倍，如果最终字节数不为 8 的倍数，则 padding 会补足至 8 的倍数。
+     *
+     * */
+
+    //That is the amount of memory the java object will need in the heap. We use this amount to update the writability of the Channel and so may mark the Channel as writable or not writable.
+    //不考虑指针压缩的大小 entry对象在堆中占用的内存大小
+    //如果开启指针压缩，entry对象在堆中占用的内存大小 会是64  这里现在要-D 修改为64
     static final int CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD =
             SystemPropertyUtil.getInt("io.netty.transport.outboundBufferEntrySizeOverhead", 96);
 
@@ -93,6 +110,7 @@ public final class ChannelOutboundBuffer {
             AtomicLongFieldUpdater.newUpdater(ChannelOutboundBuffer.class, "totalPendingSize");
 
     @SuppressWarnings("UnusedDeclaration")
+    //ChannelOutboundBuffer中的待发送数据的内存占用总量 : 所有Entry对象本身所占用内存大小 + 所有待发送数据的大小
     private volatile long totalPendingSize;
 
     private static final AtomicIntegerFieldUpdater<ChannelOutboundBuffer> UNWRITABLE_UPDATER =
@@ -110,6 +128,8 @@ public final class ChannelOutboundBuffer {
     /**
      * Add given message to this {@link ChannelOutboundBuffer}. The given {@link ChannelPromise} will be notified once
      * the message was written.
+     *
+     * 将待写入的数据添加到Netty的缓冲队列ChannelOutboundBuffer中，并增加待写入数据的大小
      */
     public void addMessage(Object msg, int size, ChannelPromise promise) {
         Entry entry = Entry.newInstance(msg, size, total(msg), promise);
@@ -171,9 +191,11 @@ public final class ChannelOutboundBuffer {
         if (size == 0) {
             return;
         }
-
+        //更新总共待写入数据的大小
         long newWriteBufferSize = TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, size);
+        //如果待写入的数据 大于 高水位线 64 * 1024  则设置当前channel为不可写 由用户自己决定是否继续写入
         if (newWriteBufferSize > channel.config().getWriteBufferHighWaterMark()) {
+            //设置当前channel状态为不可写，并触发fireChannelWritabilityChanged事件
             setUnwritable(invokeLater);
         }
     }
@@ -349,9 +371,11 @@ public final class ChannelOutboundBuffer {
                     progress(readableBytes);
                     writtenBytes -= readableBytes;
                 }
+                //移除全部全部写完的entry
                 remove();
             } else { // readableBytes > writtenBytes
                 if (writtenBytes != 0) {
+                    //只写了entry的部分数据，只需要更新buffer的readerIndex
                     buf.readerIndex(readerIndex + (int) writtenBytes);
                     progress(writtenBytes);
                 }
@@ -604,6 +628,7 @@ public final class ChannelOutboundBuffer {
             final int newValue = oldValue | 1;
             if (UNWRITABLE_UPDATER.compareAndSet(this, oldValue, newValue)) {
                 if (oldValue == 0) {
+                    //触发fireChannelWritabilityChanged事件 表示当前channel变为不可写
                     fireChannelWritabilityChanged(invokeLater);
                 }
                 break;
@@ -797,7 +822,13 @@ public final class ChannelOutboundBuffer {
         boolean processMessage(Object msg) throws Exception;
     }
 
+    public static void main(String[] args) {
+        Entry entry = new Entry();
+        System.out.println(ClassLayout.parseInstance(entry).toPrintable());
+    }
+
     static final class Entry {
+        //静态变量引用类型地址 这个是在Klass Point(类型指针)中定义 8字节（开启指针压缩 为4字节）
         private static final ObjectPool<Entry> RECYCLER = ObjectPool.newPool(new ObjectCreator<Entry>() {
             @Override
             public Entry newObject(Handle<Entry> handle) {
@@ -805,18 +836,36 @@ public final class ChannelOutboundBuffer {
             }
         });
 
-        private final Handle<Entry> handle;
+        //以下是实例变量    地址占用大小：引用类型 在堆中分配 引用类型-》8字节（开启指针压缩4字节），long型-》8字节，int型-》4字节
+        // JVM中一个对象的大小由：对象头（MarkWord + kclass point） + 实例数据（实例变量的地址占用大小） + 填充字节 组成
+
+        //DefaultHandle用于回收对象
+        //private final Handle<Entry> handle;
+        private  Handle<Entry> handle;
+        //ChannelOutboundBuffer下一个节点
         Entry next;
+        //待发送数据
         Object msg;
+        //msg 转换为 jdk nio 中的byteBuffer
         ByteBuffer[] bufs;
         ByteBuffer buf;
+        //异步write操作的future
         ChannelPromise promise;
+        //已发送了多少
         long progress;
+        //总共需要发送多少，不包含entry对象大小。
         long total;
+        //pendingSize表示entry对象在堆中需要的内存总量 待发送数据大小 + entry对象本身在堆中占用内存大小（96）
         int pendingSize;
         int count = -1;
+        //write操作是否被取消
         boolean cancelled;
 
+        public Entry() {
+
+        }
+
+        //Entry对象只能通过对象池获取，不可外部自行创建
         private Entry(Handle<Entry> handle) {
             this.handle = handle;
         }
@@ -824,6 +873,7 @@ public final class ChannelOutboundBuffer {
         static Entry newInstance(Object msg, int size, long total, ChannelPromise promise) {
             Entry entry = RECYCLER.get();
             entry.msg = msg;
+            //待发数据数据大小 + entry对象大小
             entry.pendingSize = size + CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD;
             entry.total = total;
             entry.promise = promise;

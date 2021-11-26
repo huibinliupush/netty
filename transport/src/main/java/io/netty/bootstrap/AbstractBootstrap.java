@@ -305,6 +305,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
                 //io.netty.channel.AbstractChannel.AbstractUnsafe.register0 注册成功后 发起回调
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
+                    //这里的future正是 regFuture
                     Throwable cause = future.cause();
                     if (cause != null) {
                         // Registration on the EventLoop failed so fail the ChannelPromise directly to not cause an

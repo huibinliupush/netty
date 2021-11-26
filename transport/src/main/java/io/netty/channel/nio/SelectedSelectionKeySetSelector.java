@@ -61,6 +61,8 @@ final class SelectedSelectionKeySetSelector extends Selector {
 
     @Override
     public int select(long timeout) throws IOException {
+        //JDK Selector不会主动清除selectionKeys
+        // Netty这里在调用JDK selector前，会主动清除selectionKey
         selectionKeys.reset();
         return delegate.select(timeout);
     }

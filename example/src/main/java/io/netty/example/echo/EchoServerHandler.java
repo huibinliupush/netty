@@ -15,6 +15,8 @@
  */
 package io.netty.example.echo;
 
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -25,10 +27,34 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 @Sharable
 public class EchoServerHandler extends ChannelInboundHandlerAdapter {
 
+
+    /**
+     * ctx.write(msg) ： write事件从当前ChannelHandler在pipeline中向前传递
+     *
+     * ctx.channel().write(msg) ： write事件从pipeline的末尾tailContext开始向前传递
+     *
+     * */
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+    public void channelRead(final ChannelHandlerContext ctx, final Object msg) {
         //此处的msg就是Netty在read loop中从NioSocketChannel中读取到ByteBuffer
-        ctx.write(msg);
+        ChannelFuture future = ctx.write(msg);
+        future.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                Throwable cause = future.cause();
+                if (cause != null) {
+
+                    //process happed exception will be here and you can call ctx.write(msg) to keep spreading forward
+                    // the write event in the pipeline
+                    ctx.write(msg);
+                } else {
+                    // when msg has been write to socket successfully, netty will notify here!!
+
+                }
+            }
+        });
+        ctx.writeAndFlush(msg);
+        ctx.channel().write(msg);
     }
 
     @Override
@@ -43,4 +69,6 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         cause.printStackTrace();
         ctx.close();
     }
+
+
 }

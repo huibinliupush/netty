@@ -88,6 +88,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private final DefaultChannelPipeline pipeline;
     private final String name;
     private final boolean ordered;
+    //ChannelHandler执行资格掩码
     private final int executionMask;
 
     // Will be set to null if no child executor should be used, otherwise it will be set to the
@@ -708,12 +709,15 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         if (invokeHandler()) {
             invokeWrite0(msg, promise);
         } else {
+            //当前channelHandler虽然添加到pipeline中，但是并没有调用handlerAdded
+            // 所以不能调用当前channelHandler中的回调方法，只能继续向前传递write事件
             write(msg, promise);
         }
     }
 
     private void invokeWrite0(Object msg, ChannelPromise promise) {
         try {
+            //调用当前ChannelHandler中的write方法
             ((ChannelOutboundHandler) handler()).write(this, msg, promise);
         } catch (Throwable t) {
             notifyOutboundHandlerException(t, promise);
@@ -722,7 +726,9 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     @Override
     public ChannelHandlerContext flush() {
+        //向前查找覆盖flush方法的Outbound类型的ChannelHandler
         final AbstractChannelHandlerContext next = findContextOutbound(MASK_FLUSH);
+        //获取执行ChannelHandler的executor,在初始化pipeline的时候设置，默认为Reactor线程
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
             next.invokeFlush();
@@ -741,6 +747,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         if (invokeHandler()) {
             invokeFlush0();
         } else {
+            //如果该ChannelHandler并没有加入到pipeline中则继续向前传递flush事件
             flush();
         }
     }
@@ -761,46 +768,63 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     void invokeWriteAndFlush(Object msg, ChannelPromise promise) {
         if (invokeHandler()) {
+            //向前传递write事件
             invokeWrite0(msg, promise);
+            //向前传递flush事件
             invokeFlush0();
         } else {
+            //如果channelHandler没有通过handlerAdded方法加入到pipeline中
+            //则继续向前传播write事件和flush事件 这两个事件是单独的Netty中并没有writeAndFlush事件
             writeAndFlush(msg, promise);
         }
     }
 
     /**
-     * 这里是Netty能够保证对channel操作线程安全性的原因
-     * 如果对channel的write操作 发生在Reactor线程内部，则直接将write事件在pipeline中传播
-     * 如果是外部线程 则需要封装程writeTask 放入TaskQueue（Mpsc Queue） 等待Reactor线程处理
+     * 每个ChannelHandler都可以通过 ChannelPipeline#addLast(EventExecutorGroup group, ChannelHandler... handlers)
+     * 指定执行该ChannelHandler的executor，默认为Channel绑定的reactor线程
      *
-     * 原则是 关于IO相关的操作 只能由 Reactor单线程处理 保证channel操作的线程安全性
+     * 这里需要确保ChannelHandler的write或者flush方法 必须是被 指定的executor执行
+     *
+     * 如果当前线程不是指定的executor，则将IO操作封装程异步任务 提交给 指定的executor执行
+     *
+     * 如何确保Channel的写操作线程安全？？
+     *
+     * 任何outbound事件最终都会传播到pipeline的头结点headContext，而headContext指定的executor正是channel绑定的reactor线程
+     * 所以保证了 最终向netty内核执行写操作的线程 一定是reactor线程
      * */
     private void write(Object msg, boolean flush, ChannelPromise promise) {
         ObjectUtil.checkNotNull(msg, "msg");
         try {
             if (isNotValidPromise(promise, true)) {
+                //释放directBuffer 防止内存泄露
                 ReferenceCountUtil.release(msg);
                 // cancelled
                 return;
             }
         } catch (RuntimeException e) {
+            //释放directBuffer 防止内存泄露
             ReferenceCountUtil.release(msg);
             throw e;
         }
 
+        //flush = true 表示channelHandler中调用的是writeAndFlush方法，这里需要找到pipeline中覆盖write或者flush方法的channelHandler
+        //flush = false 表示调用的是write方法，只需要找到pipeline中覆盖write方法的channelHandler
         final AbstractChannelHandlerContext next = findContextOutbound(flush ?
                 (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
+        //用于检查内存泄露
         final Object m = pipeline.touch(msg, next);
+        //获取下一个要被执行的channelHandler指定的executor
         EventExecutor executor = next.executor();
+        //确保outbound事件的执行 是由 channelHandler指定的executor执行的
         if (executor.inEventLoop()) {
-            //Reactor线程内部 则直接操作
+            //如果当前线程是指定的executor 则直接操作
             if (flush) {
                 next.invokeWriteAndFlush(m, promise);
             } else {
                 next.invokeWrite(m, promise);
             }
         } else {
-            //外部线程 则需要将IO操作封装程writeTask 放入taskQueue 中转 等待Reactor线程最终执行
+            //如果当前线程不是channelHandler指定的executor，则封装程异步任务 提交给指定的executor执行
             final WriteTask task = WriteTask.newInstance(next, m, promise, flush);
             if (!safeExecute(executor, task, promise, m, !flush)) {
                 // We failed to submit the WriteTask. We need to cancel it so we decrement the pending bytes
@@ -893,6 +917,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     private AbstractChannelHandlerContext findContextOutbound(int mask) {
         AbstractChannelHandlerContext ctx = this;
+        //获取当前ChannelHandler的executor
         EventExecutor currentExecutor = executor();
         do {
             ctx = ctx.prev;

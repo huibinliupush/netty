@@ -425,6 +425,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      */
     protected abstract class AbstractUnsafe implements Unsafe {
 
+        //待写入数据缓冲队列  Netty是全异步框架，所以这里需要一个缓冲队列来缓存用户需要发送的数据 尽快解放用户线程
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
         private boolean inFlush0;
@@ -905,11 +906,16 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        /**
+         * msg这里必须是ByteBuffer类型，业务层调用write方法写入response实体，经过编码器encode为ByteBuffer
+         * */
         @Override
         public final void write(Object msg, ChannelPromise promise) {
             assertEventLoop();
-
+            //获取当前channel对应的待写入数据缓冲队列（支持用户异步写入的核心关键）
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            // outboundBuffer == null说明channel已经关闭了，直接标记发送失败。
+            // 之前在每次write操作的时候，会判断channel.isActive()底层会有一些系统调用 开销较大
             if (outboundBuffer == null) {
                 try {
                     // release message now to prevent resource-leak
@@ -927,7 +933,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             int size;
             try {
+                //过滤message类型 这里只会接受DirectBuffer或者fileRegion类型的msg
                 msg = filterOutboundMessage(msg);
+                //计算当前msg的大小
                 size = pipeline.estimatorHandle().size(msg);
                 if (size < 0) {
                     size = 0;
@@ -940,7 +948,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 }
                 return;
             }
-
+            //将msg 加入到Netty中的待写入数据缓冲队列ChannelOutboundBuffer中
             outboundBuffer.addMessage(msg, size, promise);
         }
 
@@ -952,8 +960,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             if (outboundBuffer == null) {
                 return;
             }
-
+            //将flushedEntry指针指向ChannelOutboundBuffer头结点，此时变为即将要flush进Socket的数据队列
             outboundBuffer.addFlush();
+            //将待写数据写进Socket
             flush0();
         }
 
@@ -977,6 +986,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     // Check if we need to generate the exception at all.
                     if (!outboundBuffer.isEmpty()) {
                         if (isOpen()) {
+                            //通知promise 写入失败
                             outboundBuffer.failFlushed(new NotYetConnectedException(), true);
                         } else {
                             // Do not trigger channelWritabilityChanged because the channel is closed already.
@@ -990,6 +1000,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             try {
+                //写入Socket
                 doWrite(outboundBuffer);
             } catch (Throwable t) {
                 handleWriteError(t);

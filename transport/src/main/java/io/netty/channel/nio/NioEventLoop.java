@@ -694,6 +694,8 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             final Object a = k.attachment();
             //注意每次迭代末尾的keyIterator.remove()调用。Selector不会自己从已选择键集中移除SelectionKey实例。
             //必须在处理完通道时自己移除。下次该通道变成就绪时，Selector会再次将其放入已选择键集中。
+
+            // 这里主动清除selectedKey的目的是当Channel关闭时，可以使这些selectedKey被GC掉
             i.remove();
 
             if (a instanceof AbstractNioChannel) {
@@ -730,7 +732,8 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             final SelectionKey k = selectedKeys.keys[i];
             // null out entry in the array to allow to have it GC'ed once the Channel close
             // See https://github.com/netty/netty/issues/2363
-            // 对应迭代器中得remove   selector不会自己清除selectedKey
+            // 对应迭代器中得remove   Selector不会自己从已选择键集中移除SelectionKey实例。
+            // 这里主动清除selectedKey的目的是当Channel关闭时，可以使这些selectedKey被GC掉
             selectedKeys.keys[i] = null;
 
             final Object a = k.attachment();

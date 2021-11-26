@@ -84,6 +84,9 @@ public interface FileRegion extends ReferenceCounted {
      *                  transfer start from {@link #position()}th byte and
      *                  <tt>{@link #count()} - 1</tt> will make the last
      *                  byte of the region transferred.
+     *
+     * 零拷贝：Java input streams can support zero-copy through the java.nio.channels.FileChannel's transferTo() method if the underlying operating system also supports zero copy
+     * see https://developer.ibm.com/articles/j-zerocopy/
      */
     long transferTo(WritableByteChannel target, long position) throws IOException;
 

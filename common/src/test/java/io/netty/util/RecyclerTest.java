@@ -88,6 +88,7 @@ public class RecyclerTest {
         object.recycle();
     }
 
+
     @Test(expected = IllegalStateException.class)
     public void testMultipleRecycleAtDifferentThread() throws InterruptedException {
         Recycler<HandledObject> recycler = newRecycler(1024);

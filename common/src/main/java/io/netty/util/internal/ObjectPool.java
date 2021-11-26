@@ -68,6 +68,7 @@ public abstract class ObjectPool<T> {
     }
 
     private static final class RecyclerObjectPool<T> extends ObjectPool<T> {
+        //recycler对象池实例
         private final Recycler<T> recycler;
 
         RecyclerObjectPool(final ObjectCreator<T> creator) {

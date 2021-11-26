@@ -202,6 +202,15 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
                 //
                 // See https://github.com/netty/netty/issues/2254
+
+                /**
+                 * autoread提供一种背压机制。防止oom
+                 *
+                 * If you have not set autoread to false you may get into trouble
+                 * if one channel writes a lot of data before the other can consume it.
+                 * As it's all asynchronous you may end up with buffers that have too much data and hit OOME.
+                 *
+                 * */
                 if (!readPending && !config.isAutoRead()) {
                     removeReadOp();
                 }
@@ -267,6 +276,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             // Should not reach here.
             throw new Error();
         }
+        //走到这里表示 此时Socket已经写不进去了 退出writeLoop，注册OP_WRITE事件
         return WRITE_STATUS_SNDBUF_FULL;
     }
 
@@ -306,6 +316,15 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 "unsupported message type: " + StringUtil.simpleClassName(msg) + EXPECTED_TYPES);
     }
 
+    /**
+     * 注意 这里是没写完或者写操作被限制了  而不是SocketChannel缓冲区满导致的不能写
+     * 1：如果是Socket缓冲区满导致的不能写，这时需要注册OP_WRITE事件，等待Socket缓冲区可写时，在flush写入
+     * 2：如果是没写完或者写操作被限制，这时Socket是可写的，只不过SubReactor要处理其他Channel,所以不能注册OP_WRITE事件，否则会一直被通知
+     * 这里就需要将flush操作封装成异步任务，等到SubReactor处理完其他Channel上的IO事件，在回过头来执行flush写入
+     *
+     * Netty是全异步操作，没写完的内容会继续保存在缓冲区ChannelOutBoundBuffer中，flush就是将ChannelOutBoundBuffer中的等待写入数据，写入到
+     * Socket中
+     * */
     protected final void incompleteWrite(boolean setOpWrite) {
         // Did not write completely.
         if (setOpWrite) {
@@ -315,10 +334,19 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             // use our write quantum. In this case we no longer want to set the write OP because the socket is still
             // writable (as far as we know). We will find out next time we attempt to write if the socket is writable
             // and set the write OP if necessary.
+            //必须清除OP_WRITE事件，此时Socket对应的缓冲区依然是可写的，只不过当前channel写够了16次，被SubReactor限制了。
+            // 这样SubReactor可以腾出手来处理其他channel上的IO事件。这里如果不清除OP_WRITE事件，则会一直被通知。
             clearOpWrite();
 
             // Schedule flush again later so other tasks can be picked up in the meantime
+            //如果本次writeLoop还没写完，则提交flushTask到SubReactor
+            //释放SubReactor让其可以继续处理其他Channel上的IO事件
             eventLoop().execute(flushTask);
+
+            /**
+             * SubReactor处理OP_WRITE事件也是执行一次flush操作。
+             * 这里还不如直接将flush操作封装成异步任务 直接提交给SubReactor
+             * */
         }
     }
 

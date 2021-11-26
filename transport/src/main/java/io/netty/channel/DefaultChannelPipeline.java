@@ -70,6 +70,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
     private final boolean touch = ResourceLeakDetector.isEnabled();
 
     private Map<EventExecutorGroup, EventExecutor> childExecutors;
+    //计算要发送msg大小的handler
     private volatile MessageSizeEstimator.Handle estimatorHandle;
     private boolean firstRegistration = true;
 
@@ -1366,6 +1367,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
         @Override
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+            //到headContext这里 msg的类型必须是ByteBuffer，也就是说必须经过编码器将业务层写入的实体编码为ByteBuffer
             unsafe.write(msg, promise);
         }
 
