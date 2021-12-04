@@ -89,6 +89,12 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         return isInputShutdown0() && (inputClosedSeenErrorOnRead || !isAllowHalfClosure(config));
     }
 
+    /**
+     *
+     *   是否允许半关闭，当客户端发送fin主动关闭连接时（客户端发送通道关闭，但接收通道还没关闭），服务端回复ack 随后进入close_wait状态（服务端接收通道关闭，发送通道没有关闭）
+     *   但是服务端允许在close_wait状态不调用close方法（从而无法发送fin到客户端）
+     *   此时客户端的状态为fin_wait_2，服务端的状态为close_wait  为半关闭状态
+     * */
     private static boolean isAllowHalfClosure(ChannelConfig config) {
         return config instanceof SocketChannelConfig &&
                 ((SocketChannelConfig) config).isAllowHalfClosure();
@@ -134,6 +140,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         @Override
         public final void read() {
             final ChannelConfig config = config();
+            //如果inputClosedSeenErrorOnRead = true ，移除对SelectionKey.OP_READ事件。
+            //inputClosedSeenErrorOnRead表示当前channel读取通道已经关闭（close_wait状态），closeOnRead方法中设置
             if (shouldBreakReadReady(config)) {
                 clearReadPending();
                 return;
@@ -162,10 +170,12 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     //记录本次读取了多少字节数
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
                     //如果本次没有读取到任何字节，则退出循环 进行下一轮事件轮询
+                    // -1 表示客户端主动关闭了连接
                     if (allocHandle.lastBytesRead() <= 0) {
                         // nothing was read. release the buffer.
                         byteBuf.release();
                         byteBuf = null;
+                        //当客户端主动关闭连接时（客户端发送fin1），会触发read就绪事件，这里从channel读取的数据会是-1
                         close = allocHandle.lastBytesRead() < 0;
                         if (close) {
                             // There is nothing left to read as we received an EOF.
@@ -191,6 +201,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 pipeline.fireChannelReadComplete();
 
                 if (close) {
+                    //此时客户端发送fin1（fi_wait_1状态）主动关闭连接，服务端接收到fin，并回复ack进入close_wait状态
+                    //在服务端进入close_wait状态 需要调用close 方法向客户端发送fin_ack，服务端才能结束close_wait状态
                     closeOnRead(pipeline);
                 }
             } catch (Throwable t) {
@@ -243,6 +255,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
     private int doWriteInternal(ChannelOutboundBuffer in, Object msg) throws Exception {
         if (msg instanceof ByteBuf) {
+            //用于处理io.netty.channel.nio.AbstractNioByteChannel.doWrite中的发送逻辑
             ByteBuf buf = (ByteBuf) msg;
             if (!buf.isReadable()) {
                 in.remove();
@@ -259,11 +272,14 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             }
         } else if (msg instanceof FileRegion) {
             FileRegion region = (FileRegion) msg;
+            //文件已经传输完毕
             if (region.transferred() >= region.count()) {
                 in.remove();
+                //当前FileRegion中的文件数据已经传输完毕，本次writeLoop并没有写任何数据，所以返回0 WriteSpinCount不变
                 return 0;
             }
 
+            //零拷贝的方式传输文件
             long localFlushedAmount = doWriteFileRegion(region);
             if (localFlushedAmount > 0) {
                 in.progress(localFlushedAmount);
@@ -317,7 +333,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     }
 
     /**
-     * 注意 这里是没写完或者写操作被限制了  而不是SocketChannel缓冲区满导致的不能写
+     * 注意 这里是没写完或者写操作被限制了
      * 1：如果是Socket缓冲区满导致的不能写，这时需要注册OP_WRITE事件，等待Socket缓冲区可写时，在flush写入
      * 2：如果是没写完或者写操作被限制，这时Socket是可写的，只不过SubReactor要处理其他Channel,所以不能注册OP_WRITE事件，否则会一直被通知
      * 这里就需要将flush操作封装成异步任务，等到SubReactor处理完其他Channel上的IO事件，在回过头来执行flush写入
@@ -328,8 +344,13 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     protected final void incompleteWrite(boolean setOpWrite) {
         // Did not write completely.
         if (setOpWrite) {
+            //这里处理还没写满16次 但是socket缓冲区已满写不进去的情况 注册write事件
+            // 什么时候socket可写了， epoll会通知reactor线程继续写
             setOpWrite();
         } else {
+            //这里处理的是socket缓冲区依然可写，但是写了16次还没写完，这时就不能在写了，reactor线程需要处理其他channel上的io事件
+            //把当前写任务封装task提交给reactor，等reactor执行完其他channel上的io操作，在执行异步任务写操作
+            // 目的就要是保证reactor可以均衡的处理channel上的io操作。
             // It is possible that we have set the write OP, woken up by NIO because the socket is writable, and then
             // use our write quantum. In this case we no longer want to set the write OP because the socket is still
             // writable (as far as we know). We will find out next time we attempt to write if the socket is writable
@@ -344,8 +365,10 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             eventLoop().execute(flushTask);
 
             /**
-             * SubReactor处理OP_WRITE事件也是执行一次flush操作。
-             * 这里还不如直接将flush操作封装成异步任务 直接提交给SubReactor
+             * 因为这里的情况时socket依然可写，但是已经写满16次了，直接创建flushTask，等reactor执行完其他channel上的IO事件
+             * 最后再来执行flushTask。
+             *
+             * 这里不注册OP_WRITE事件的原因在于，此时Socket是可写的，如果注册了OP_WRITE事件会一直被通知。
              * */
         }
     }

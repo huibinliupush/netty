@@ -21,6 +21,7 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -59,6 +60,7 @@ public final class EchoServer {
              .channel(NioServerSocketChannel.class)//配置主Reactor中的channel类型
              .option(ChannelOption.SO_BACKLOG, 100)//设置主Reactor中channel的属性
              .handler(new LoggingHandler(LogLevel.INFO))//设置主Reactor中Channel->pipline->handler
+             .childOption(ChannelOption.WRITE_SPIN_COUNT,5)
              .childHandler(new ChannelInitializer<SocketChannel>() {//设置从Reactor中注册channel的pipeline
                  @Override
                  public void initChannel(SocketChannel ch) throws Exception {

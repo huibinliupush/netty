@@ -100,6 +100,9 @@ public class ChannelOption<T> extends AbstractConstant<ChannelOption<T>> {
     public static final ChannelOption<WriteBufferWaterMark> WRITE_BUFFER_WATER_MARK =
             valueOf("WRITE_BUFFER_WATER_MARK");
 
+    //是否允许半关闭，当客户端发送fin主动关闭连接时（客户端发送通道关闭，但接收通道还没关闭），服务端回复ack 随后进入close_wait状态（服务端接收通道关闭，发送通道没有关闭）
+    //但是服务端允许在close_wait状态不调用close方法（从而无法发送fin到客户端）
+    //此时客户端的状态为fin_wait_2，服务端的状态为close_wait  为半关闭状态
     public static final ChannelOption<Boolean> ALLOW_HALF_CLOSURE = valueOf("ALLOW_HALF_CLOSURE");
     public static final ChannelOption<Boolean> AUTO_READ = valueOf("AUTO_READ");
 

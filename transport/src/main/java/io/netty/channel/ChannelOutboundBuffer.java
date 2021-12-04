@@ -106,6 +106,7 @@ public final class ChannelOutboundBuffer {
 
     private boolean inFail;
 
+    //水位线指针
     private static final AtomicLongFieldUpdater<ChannelOutboundBuffer> TOTAL_PENDING_SIZE_UPDATER =
             AtomicLongFieldUpdater.newUpdater(ChannelOutboundBuffer.class, "totalPendingSize");
 
@@ -117,6 +118,7 @@ public final class ChannelOutboundBuffer {
             AtomicIntegerFieldUpdater.newUpdater(ChannelOutboundBuffer.class, "unwritable");
 
     @SuppressWarnings("UnusedDeclaration")
+    // 0表示channel可写，1表示channel不可写
     private volatile int unwritable;
 
     private volatile Runnable fireChannelWritabilityChangedTask;
@@ -166,6 +168,7 @@ public final class ChannelOutboundBuffer {
             }
             do {
                 flushed ++;
+                //如果当前entry对应的write操作被用户取消，则释放msg，并降低channelOutboundBuffer水位线
                 if (!entry.promise.setUncancellable()) {
                     // Was cancelled so make sure we free up memory and notify about the freed bytes
                     int pending = entry.cancel();
@@ -313,6 +316,7 @@ public final class ChannelOutboundBuffer {
     private boolean remove0(Throwable cause, boolean notifyWritability) {
         Entry e = flushedEntry;
         if (e == null) {
+            //清空当前reactor线程缓存的所有待发送数据
             clearNioBuffers();
             return false;
         }
@@ -320,18 +324,21 @@ public final class ChannelOutboundBuffer {
 
         ChannelPromise promise = e.promise;
         int size = e.pendingSize;
-
+        //从channelOutboundBuffer中删除该Entry节点
         removeEntry(e);
 
         if (!e.cancelled) {
             // only release message, fail and decrement if it was not canceled before.
+            //释放msg所占用的内存空间
             ReferenceCountUtil.safeRelease(msg);
-
+            //编辑promise发送失败，并通知相应的Lisener
             safeFail(promise, cause);
+            //由于msg得到释放，所以需要降低channelOutboundBuffer中的内存占用水位线，并根据notifyWritability决定是否触发ChannelWritabilityChanged事件
             decrementPendingOutboundBytes(size, false, notifyWritability);
         }
 
         // recycle the entry
+        //回收Entry实例对象
         e.recycle();
 
         return true;
@@ -356,6 +363,7 @@ public final class ChannelOutboundBuffer {
      */
     public void removeBytes(long writtenBytes) {
         for (;;) {
+            //获取当前正在flush的Entry节点
             Object msg = current();
             if (!(msg instanceof ByteBuf)) {
                 assert writtenBytes == 0;
@@ -368,6 +376,7 @@ public final class ChannelOutboundBuffer {
 
             if (readableBytes <= writtenBytes) {
                 if (writtenBytes != 0) {
+                    //记录当前entry的发送进度，目前已经发送了多少字节
                     progress(readableBytes);
                     writtenBytes -= readableBytes;
                 }
@@ -382,6 +391,7 @@ public final class ChannelOutboundBuffer {
                 break;
             }
         }
+        //本次writeloop 发送完毕后 需要清理jdk nioBuffers数组，方便下次writeloop复用
         clearNioBuffers();
     }
 
@@ -426,9 +436,13 @@ public final class ChannelOutboundBuffer {
     public ByteBuffer[] nioBuffers(int maxCount, long maxBytes) {
         assert maxCount > 0;
         assert maxBytes > 0;
+        //当前已经转换转换了多少个字节到jdk niobuffer中  不能超过maxBytes
         long nioBufferSize = 0;
+        //当前已经转换了多少个jdk nioBuffer 不能超过maxCount
         int nioBufferCount = 0;
         final InternalThreadLocalMap threadLocalMap = InternalThreadLocalMap.get();
+        //reactor线程缓存的jdk nioBuffer数组，每次发送数据的时候会复用该数组 用于占存待发送数据
+        // msg中的nioBuffer（Netty实现）在这里会转换为 jdk nioBuffer，随后会存储在该数组中 准备发送
         ByteBuffer[] nioBuffers = NIO_BUFFERS.get(threadLocalMap);
         Entry entry = flushedEntry;
         while (isFlushedEntry(entry) && entry.msg instanceof ByteBuf) {
@@ -438,6 +452,7 @@ public final class ChannelOutboundBuffer {
                 final int readableBytes = buf.writerIndex() - readerIndex;
 
                 if (readableBytes > 0) {
+                    //这里需要保证至少已经转换了一个nioBuffer以确保写流程继续，即便这里可能转换的字节数已经达到maxBytes
                     if (maxBytes - readableBytes < nioBufferSize && nioBufferCount != 0) {
                         // If the nioBufferSize + readableBytes will overflow maxBytes, and there is at least one entry
                         // we stop populate the ByteBuffer array. This is done for 2 reasons:
@@ -453,27 +468,33 @@ public final class ChannelOutboundBuffer {
                         break;
                     }
                     nioBufferSize += readableBytes;
-                    int count = entry.count;
+                    //发送数据msg中包含了多少个nioBuffer
+                    int count = entry.count;//初始为-1
                     if (count == -1) {
                         //noinspection ConstantValueVariableUse
                         entry.count = count = buf.nioBufferCount();
                     }
                     int neededSpace = min(maxCount, nioBufferCount + count);
+                    //如果本次需要转换的nioBuffer个数超过初始值1024，就需要对nioBuffers进行扩容
                     if (neededSpace > nioBuffers.length) {
                         nioBuffers = expandNioBufferArray(nioBuffers, neededSpace, nioBufferCount);
+                        //重新设置reactor线程缓存的jdk nioBuffer数组（每次发送数据会复用）
                         NIO_BUFFERS.set(threadLocalMap, nioBuffers);
                     }
-                    if (count == 1) {
+                    if (count == 1) {//msg中只包含一个NioBuffer（Netty实现）
                         ByteBuffer nioBuf = entry.buf;
                         if (nioBuf == null) {
                             // cache ByteBuffer as it may need to create a new ByteBuffer instance if its a
                             // derived buffer
+                            //将netty实现的nioBuffer转换为jdk 中的 nioBuffer
                             entry.buf = nioBuf = buf.internalNioBuffer(readerIndex, readableBytes);
                         }
+                        //将转换后的jdk nioBuffer 占存在 nioBuffers数组中(reactor线程本地缓存)
                         nioBuffers[nioBufferCount++] = nioBuf;
                     } else {
                         // The code exists in an extra method to ensure the method is not too big to inline as this
                         // branch is not very likely to get hit very frequently.
+                        // msg中包含多个nioBuffer（Netty实现）这里需要转为多个jdk nioBuffer
                         nioBufferCount = nioBuffers(entry, buf, nioBuffers, nioBufferCount, maxCount);
                     }
                     if (nioBufferCount >= maxCount) {
@@ -494,6 +515,7 @@ public final class ChannelOutboundBuffer {
         if (nioBufs == null) {
             // cached ByteBuffers as they may be expensive to create in terms
             // of Object allocation
+            //当buf（netty实现）中包含多个nioBuffer时，这里需要转换为多个jdk nioBuffer
             entry.bufs = nioBufs = buf.nioBuffers();
         }
         for (int i = 0; i < nioBufs.length && nioBufferCount < maxCount; ++i) {
@@ -846,8 +868,9 @@ public final class ChannelOutboundBuffer {
         Entry next;
         //待发送数据
         Object msg;
-        //msg 转换为 jdk nio 中的byteBuffer
+        //如果msg中包含多个NioBuffer(Netty实现)，那么会在flush过程中将其转换为JDK NioBuffer存储在该字段
         ByteBuffer[] bufs;
+        //如果msg中只包含一个NioBuffer(Netty实现)，那么会在flush过程中将其转换为JDK NioBuffer存储在该字段
         ByteBuffer buf;
         //异步write操作的future
         ChannelPromise promise;
@@ -857,6 +880,7 @@ public final class ChannelOutboundBuffer {
         long total;
         //pendingSize表示entry对象在堆中需要的内存总量 待发送数据大小 + entry对象本身在堆中占用内存大小（96）
         int pendingSize;
+        //发送数据msg中包含了多少个nioBuffer
         int count = -1;
         //write操作是否被取消
         boolean cancelled;

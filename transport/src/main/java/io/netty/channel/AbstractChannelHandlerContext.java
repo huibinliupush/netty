@@ -919,12 +919,41 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         AbstractChannelHandlerContext ctx = this;
         //获取当前ChannelHandler的executor
         EventExecutor currentExecutor = executor();
+
         do {
             ctx = ctx.prev;
         } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_OUTBOUND));
+
+      /*  do {
+            ctx = ctx.prev;
+        } while ((ctx.executionMask & mask) == 0);*/
         return ctx;
     }
 
+    /**
+     * 1: 前一个channelHandler中没有实现mask中指定的方法。则跳过。比如传播write事件，前一个channelHandler中并没有实现write方法则跳过继续向前寻找
+     *
+     * 2：如果前一个channelHandler只实现了onlyMask中的方法，并没有实现mask中的方法并且所属executor与当前channleHander的executor相同则跳过
+     *
+     * 反向意思就是，
+     * 1：如果前一个channelHandler中实现了mask中的方法，则它必定不会跳过，会被执行
+     *
+     * 2：首先channelHandler是一个outBoundHandler(实现onlyMask中的方法)，同时没有实现mask中的方法，但是executor不一样 是不能跳过的
+     * 比如传播write事件，前一个channelHandler并没有实现write方法，但是前一个channelHandler的executor与当前executor不一样，所以
+     * 前一个channelHandler这里就不能跳过
+     *
+     *
+     * 这里的意思是只能跳过executor相同但未实现mask方法的channelHandler
+     *
+     * 其实这个方法的本意就是跳过哪些未实现指定mask方法的channelHandler-》(ctx.executionMask & mask) == 0，之所以加入executor的判断是为了解决这个问题https://github.com/netty/netty/issues/10067
+     * 当然前提是channelHandler必须是ChannelOutboundHandler
+     *
+     * 举例：
+     * 1：当channelHandler之间的executor相同的情况下，对于一个ChannelOutboundHandler来说，如果前一个channelHandler没有实现指定的mask方法，则跳过
+     * 如果实现了mask指定的方法 则不跳过
+     *
+     * 2：当channelHandler之间executor不同的情况下，对于ChannelOutboundHandler来说，不管前一个channelHandler有没有实现mask指定的方法，均不能跳过
+     * */
     private static boolean skipContext(
             AbstractChannelHandlerContext ctx, EventExecutor currentExecutor, int mask, int onlyMask) {
         // Ensure we correctly handle MASK_EXCEPTION_CAUGHT which is not included in the MASK_EXCEPTION_CAUGHT
@@ -1064,6 +1093,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
                 SystemPropertyUtil.getBoolean("io.netty.transport.estimateSizeOnSubmit", true);
 
         // Assuming compressed oops, 12 bytes obj header, 4 ref fields and one int field
+        // WriteTask对象大小 在开启指针压缩的情况下
         private static final int WRITE_TASK_OVERHEAD =
                 SystemPropertyUtil.getInt("io.netty.transport.writeTaskSizeOverhead", 32);
 

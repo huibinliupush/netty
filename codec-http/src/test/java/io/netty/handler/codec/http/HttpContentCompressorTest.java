@@ -291,17 +291,17 @@ public class HttpContentCompressorTest {
                 @Override
                 protected void initChannel(LocalChannel ch) throws Exception {
                     ch.pipeline()
-                        .addLast(new HttpServerCodec())
-                        .addLast(new HttpObjectAggregator(1024))
-                        .addLast(compressorGroup, new HttpContentCompressor())
-                        .addLast(new ChannelOutboundHandlerAdapter() {
+                        .addLast("httpServerCodec",new HttpServerCodec())
+                        .addLast("httpObjectAggregator",new HttpObjectAggregator(1024))
+                        .addLast(compressorGroup,"httpContentCompressor", new HttpContentCompressor())
+                        .addLast("outBoundHandler",new ChannelOutboundHandlerAdapter() {
                             @Override
                             public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise)
                                 throws Exception {
                                 super.write(ctx, msg, promise);
                             }
                         })
-                        .addLast(new ChannelInboundHandlerAdapter() {
+                        .addLast("inBoundHandler",new ChannelInboundHandlerAdapter() {
                             @Override
                             public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
                                 if (msg instanceof FullHttpRequest) {

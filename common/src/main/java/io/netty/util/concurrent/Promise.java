@@ -59,6 +59,14 @@ public interface Promise<V> extends Future<V> {
     /**
      * Make this future impossible to cancel.
      *
+     * 返回true的情况：
+     * 1：成功的将future设置为uncancellable
+     * 2：当future已经成功完成
+     *
+     * 返回false的情况：
+     * 1：future已经被取消，则不能在设置 uncancellable 状态
+     *
+     *
      * @return {@code true} if and only if successfully marked this future as uncancellable or it is already done
      *         without being cancelled.  {@code false} if this future has been cancelled already.
      */

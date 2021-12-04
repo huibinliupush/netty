@@ -428,6 +428,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         //待写入数据缓冲队列  Netty是全异步框架，所以这里需要一个缓冲队列来缓存用户需要发送的数据 尽快解放用户线程
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
+        //是否正在进行flush操作
         private boolean inFlush0;
         /** true if the channel has never been registered, false otherwise */
         private boolean neverRegistered = true;
@@ -957,6 +958,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             assertEventLoop();
 
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            //channel以关闭
             if (outboundBuffer == null) {
                 return;
             }
@@ -974,6 +976,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            //channel已经关闭或者outboundBuffer为空
             if (outboundBuffer == null || outboundBuffer.isEmpty()) {
                 return;
             }
@@ -986,10 +989,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     // Check if we need to generate the exception at all.
                     if (!outboundBuffer.isEmpty()) {
                         if (isOpen()) {
-                            //通知promise 写入失败
+                            //当前channel处于disConnected状态  通知promise 写入失败 并触发channelWritabilityChanged事件
                             outboundBuffer.failFlushed(new NotYetConnectedException(), true);
                         } else {
                             // Do not trigger channelWritabilityChanged because the channel is closed already.
+                            //当前channel处于关闭状态 通知promise 写入失败 但不触发channelWritabilityChanged事件
                             outboundBuffer.failFlushed(newClosedChannelException(initialCloseCause, "flush0()"), false);
                         }
                     }

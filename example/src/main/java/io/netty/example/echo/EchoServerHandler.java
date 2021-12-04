@@ -54,13 +54,13 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
             }
         });
         ctx.writeAndFlush(msg);
-        ctx.channel().write(msg);
     }
 
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) {
         //本次OP_READ事件处理完毕
         ctx.flush();
+        ctx.channel().flush();
     }
 
     @Override
@@ -70,5 +70,13 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         ctx.close();
     }
 
+    @Override
+    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
 
+        if (ctx.channel().isWritable()) {
+
+        } else {
+
+        }
+    }
 }
