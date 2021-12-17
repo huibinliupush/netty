@@ -345,7 +345,7 @@ public class HttpContentCompressorTest {
 
             client.writeAndFlush(newRequest()).sync();
 
-            assertEncodedResponse((HttpResponse) responses.poll(1, TimeUnit.SECONDS));
+            assertEncodedResponse((HttpResponse) responses.poll(2, TimeUnit.SECONDS));
             HttpContent c = (HttpContent) responses.poll(1, TimeUnit.SECONDS);
             assertNotNull(c);
             assertThat(ByteBufUtil.hexDump(c.content()),

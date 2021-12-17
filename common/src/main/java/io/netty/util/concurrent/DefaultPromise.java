@@ -48,6 +48,8 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     private static final StackTraceElement[] CANCELLATION_STACK = CANCELLATION_CAUSE_HOLDER.cause.getStackTrace();
 
     private volatile Object result;
+    //为channelHandler对应的executor，在哪个channelHandler中new出的promise类，执行promise的listener回调就会在这个channelHandler对应的
+    //executor中进行
     private final EventExecutor executor;
     /**
      * One or more listeners. Can be a {@link GenericFutureListener} or a {@link DefaultFutureListeners}.

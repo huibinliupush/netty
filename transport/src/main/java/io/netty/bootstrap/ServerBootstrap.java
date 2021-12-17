@@ -25,6 +25,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.DefaultChannelPipeline;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
 import io.netty.util.AttributeKey;
@@ -55,7 +56,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     private final ServerBootstrapConfig config = new ServerBootstrapConfig(this);
     //Sub Reactor线程组
     private volatile EventLoopGroup childGroup;
-    //socketChannel中pipeline中的处理handler
+    //socketChannel中pipeline中的ChannelHandler 如果是一个则直接设置，如果是多个则设置ChannelInitializer
     private volatile ChannelHandler childHandler;
 
     public ServerBootstrap() { }
@@ -171,6 +172,13 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
          * 所以等到 register0() 执行完之后才能被添加到 Pipeline 当中,
          * (创建Acceptor封装成异步任务存储在taskQueue中，等待Reactor线程执行完register0注册流程，然后执行异步任务)
          *
+         * 注意此时channel并没有注册到reactor中，所以此时在向pipeline添加channelHandler的时候，虽然可以将channelHandler物理上插入到pipeline
+         * 的双向链表中，但是该channelHandler也就是ChannelInitializer的状态是ADD_PENDING状态，同时netty会向pipeline中的pendingHandlerCallbackHead任务链表
+         * 中添加PendingHandlerAddedTask任务，目的是当channel向reactor注册成功之后，pipeline中的PendingHandlerAddedTask任务会被回调，
+         * 在任务中channelHandler的handlerAdded方法会被回调，这样使得ChannelInitializer中的initChannel方法被调用从而初始化pipeline
+         *
+         * @see AbstractUnsafe#register0(io.netty.channel.ChannelPromise)
+         * @see DefaultChannelPipeline#addLast(io.netty.util.concurrent.EventExecutorGroup, java.lang.String, io.netty.channel.ChannelHandler)
          * */
         p.addLast(new ChannelInitializer<Channel>() {
             @Override
@@ -244,6 +252,15 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             final Channel child = (Channel) msg;
 
             //初始化客户端SocketChannel
+            /**
+             * 注意此时channel并没有注册到reactor中，所以此时在向pipeline添加channelHandler的时候，虽然可以将channelHandler物理上插入到pipeline
+             * 的双向链表中，但是该channelHandler也就是ChannelInitializer的状态是ADD_PENDING状态，同时netty会向pipeline中的pendingHandlerCallbackHead任务链表
+             * 中添加PendingHandlerAddedTask任务，目的是当channel向reactor注册成功之后，pipeline中的PendingHandlerAddedTask任务会被回调，
+             * 在任务中channelHandler的handlerAdded方法会被回调，这样使得ChannelInitializer中的initChannel方法被调用从而初始化pipeline
+             *
+             * @see AbstractUnsafe#register0(io.netty.channel.ChannelPromise)
+             * @see DefaultChannelPipeline#addLast(io.netty.util.concurrent.EventExecutorGroup, java.lang.String, io.netty.channel.ChannelHandler)
+             * */
             child.pipeline().addLast(childHandler);
 
             setChannelOptions(child, childOptions, logger);

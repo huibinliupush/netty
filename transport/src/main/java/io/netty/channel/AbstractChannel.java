@@ -525,6 +525,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 // user may already fire events through the pipeline in the ChannelFutureListener.
 
                 /**
+                 * 调用pipeline中的任务链表，执行PendingHandlerAddedTask和PendingHandlerRemovedTask任务
+                 * 回调当前pipeline中channelHandler中的handlerAdded或者handlerRemoved
+                 *
                  * 触发handlerAdded回调，在回调中初始化pipeline 调用 ChannelInitializer#initChannel添加用户自定义channelHandler
                  * io.netty.channel.ChannelInitializer#handlerAdded(io.netty.channel.ChannelHandlerContext)
                  * 还记得ChannelInitializer在什么时候添加到pipeline中的吗?

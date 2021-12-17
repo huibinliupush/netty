@@ -64,6 +64,9 @@ final class ChannelHandlerMask {
             MASK_CLOSE | MASK_DEREGISTER | MASK_READ | MASK_WRITE | MASK_FLUSH;
     private static final int MASK_ALL_OUTBOUND = MASK_EXCEPTION_CAUGHT | MASK_ONLY_OUTBOUND;
 
+    //缓存channelHander类对应的执行掩码，因为ChannelHandler类一旦被定义出来它的执行掩码就固定了
+    //而netty需要接收大量的连接，创建大量的channel，并为这些channel初始化对应的pipeline，需要频繁的记录channelHandler的掩码
+    //到context类中，所以这里需要将掩码缓存起来
     private static final FastThreadLocal<Map<Class<? extends ChannelHandler>, Integer>> MASKS =
             new FastThreadLocal<Map<Class<? extends ChannelHandler>, Integer>>() {
                 @Override
@@ -78,9 +81,11 @@ final class ChannelHandlerMask {
     static int mask(Class<? extends ChannelHandler> clazz) {
         // Try to obtain the mask from the cache first. If this fails calculate it and put it in the cache for fast
         // lookup in the future.
+        // 因为每建立一个channel就会初始化一个pipeline，这里需要将ChannelHandler对应的mask缓存取来
         Map<Class<? extends ChannelHandler>, Integer> cache = MASKS.get();
         Integer mask = cache.get(clazz);
         if (mask == null) {
+            //计算ChannelHandler对应的mask（什么类型的ChannelHandler，对什么事件感兴趣）
             mask = mask0(clazz);
             cache.put(clazz, mask);
         }
@@ -94,8 +99,10 @@ final class ChannelHandlerMask {
         int mask = MASK_EXCEPTION_CAUGHT;
         try {
             if (ChannelInboundHandler.class.isAssignableFrom(handlerType)) {
+                //如果该ChannelHandler是Inbound类型的，则先将inbound事件全部设置进掩码中
                 mask |= MASK_ALL_INBOUND;
 
+                //最后在对不感兴趣的事件一一排除（handler中的事件回调方法如果标注了@Skip注解，则认为handler对该事件不感兴趣）
                 if (isSkippable(handlerType, "channelRegistered", ChannelHandlerContext.class)) {
                     mask &= ~MASK_CHANNEL_REGISTERED;
                 }
@@ -123,8 +130,10 @@ final class ChannelHandlerMask {
             }
 
             if (ChannelOutboundHandler.class.isAssignableFrom(handlerType)) {
+                //如果handler为Outbound类型的，则先将全部outbound事件设置进掩码中
                 mask |= MASK_ALL_OUTBOUND;
 
+                //最后对handler不感兴趣的事件从掩码中一一排除
                 if (isSkippable(handlerType, "bind", ChannelHandlerContext.class,
                         SocketAddress.class, ChannelPromise.class)) {
                     mask &= ~MASK_BIND;
@@ -162,6 +171,7 @@ final class ChannelHandlerMask {
             PlatformDependent.throwException(e);
         }
 
+        //计算出的掩码需要缓存，因为每次向pipeline中添加该类型的handler的时候都需要获取掩码（创建一个channel 就需要为其初始化Pipeline）
         return mask;
     }
 

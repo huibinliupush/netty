@@ -61,6 +61,8 @@ import static io.netty.channel.ChannelHandlerMask.mask;
 abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, ResourceLeakHint {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannelHandlerContext.class);
+    //pipeline是一个由ChannelHandlerContext构成的双向链表
+    //这里需要保存其前驱节点和后续节点的指针
     volatile AbstractChannelHandlerContext next;
     volatile AbstractChannelHandlerContext prev;
 
@@ -82,17 +84,28 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     /**
      * Neither {@link ChannelHandler#handlerAdded(ChannelHandlerContext)}
      * nor {@link ChannelHandler#handlerRemoved(ChannelHandlerContext)} was called.
+     *
+     * channelHandlerContext被创建后的初始状态，需要等到状态变为ADD_COMPLETE才算真正的插入到pipeline中
+     *
+     * 当ChannelHandler的handlerAdded方法被回调时，状态才能变为ADD_COMPLETE，只有状态为ADD_COMPLETE的channelHandler才能
+     * 响应事件的传播
      */
     private static final int INIT = 0;
 
+    //ChannelHandlerContext中持有pipeline的引用
     private final DefaultChannelPipeline pipeline;
+    //对应channelHandler的名称
     private final String name;
+    //false表示 当channelHandler的状态为ADD_PENDING的时候，也可以响应pipeline中的事件
+    //true表示只有在channelHandler的状态为ADD_COMPLETE的时候才能响应pipeline中的事件
+    //@see io.netty.channel.AbstractChannelHandlerContext.invokeHandler
     private final boolean ordered;
-    //ChannelHandler执行资格掩码
+    //channelHandlerContext中保存channelHandler的执行条件掩码（是什么类型的ChannelHandler,对什么事件感兴趣）
     private final int executionMask;
 
     // Will be set to null if no child executor should be used, otherwise it will be set to the
     // child executor.
+    // channelHandler对应的executor 默认为reactor
     final EventExecutor executor;
     private ChannelFuture succeededFuture;
 
@@ -100,6 +113,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     // There is no need to make this volatile as at worse it will just create a few more instances then needed.
     private Tasks invokeTasks;
 
+    //channelHandelr的初始化状态为INIT
     private volatile int handlerState = INIT;
 
     AbstractChannelHandlerContext(DefaultChannelPipeline pipeline, EventExecutor executor,
@@ -107,6 +121,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         this.name = ObjectUtil.checkNotNull(name, "name");
         this.pipeline = pipeline;
         this.executor = executor;
+        //channelHandlerContext中保存channelHandler的执行条件掩码（是什么类型的ChannelHandler,对什么事件感兴趣）
         this.executionMask = mask(handlerClass);
         // Its ordered if its driven by the EventLoop or the given Executor is an instanceof OrderedEventExecutor.
         ordered = executor == null || executor instanceof OrderedEventExecutor;
@@ -362,6 +377,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     static void invokeChannelRead(final AbstractChannelHandlerContext next, Object msg) {
         final Object m = next.pipeline.touch(ObjectUtil.checkNotNull(msg, "msg"), next);
         EventExecutor executor = next.executor();
+        //需要保证channelRead事件回调在channelHandler指定的executor中进行
         if (executor.inEventLoop()) {
             next.invokeChannelRead(m);
         } else {
@@ -747,7 +763,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         if (invokeHandler()) {
             invokeFlush0();
         } else {
-            //如果该ChannelHandler并没有加入到pipeline中则继续向前传递flush事件
+            //如果该ChannelHandler虽然加入到pipeline中但handlerAdded方法并未被回调，则继续向前传递flush事件
             flush();
         }
     }
@@ -912,6 +928,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         do {
             ctx = ctx.next;
         } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_INBOUND));
+
         return ctx;
     }
 
@@ -924,9 +941,6 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             ctx = ctx.prev;
         } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_OUTBOUND));
 
-      /*  do {
-            ctx = ctx.prev;
-        } while ((ctx.executionMask & mask) == 0);*/
         return ctx;
     }
 

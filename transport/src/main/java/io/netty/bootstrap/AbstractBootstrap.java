@@ -70,7 +70,8 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
     //serverSocketChannel中pipeline里的handler(主要是acceptor)
-    //只能向serverSocketChannel中添加一个自定义ChannelHandler
+    //用于设置serverSocketChannel中的pipeline中的ChannelHandler，如果是多个可以是ChannelInitializer
+    //如果是一个则直接设置
     private volatile ChannelHandler handler;
 
     AbstractBootstrap() {
@@ -391,7 +392,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
          *
          * register0注册流程完毕后执行异步任务
          *
-         * 1: 添加acceptro
+         * 1: 添加acceptor
          * 2: doBind
          * */
 

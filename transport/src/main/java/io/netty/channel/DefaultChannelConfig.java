@@ -70,6 +70,7 @@ public class DefaultChannelConfig implements ChannelConfig {
     private volatile boolean autoClose = true;
     //ChannelOutboundBuffer中的高低水位线
     private volatile WriteBufferWaterMark writeBufferWaterMark = WriteBufferWaterMark.DEFAULT;
+    //ChannelOption.SINGLE_EVENTEXECUTOR_PER_GROUP 默认值
     private volatile boolean pinEventExecutor = true;
 
     public DefaultChannelConfig(Channel channel) {
@@ -317,8 +318,10 @@ public class DefaultChannelConfig implements ChannelConfig {
     public ChannelConfig setAutoRead(boolean autoRead) {
         boolean oldAutoRead = AUTOREAD_UPDATER.getAndSet(this, autoRead ? 1 : 0) == 1;
         if (autoRead && !oldAutoRead) {
+            //autoRead从false变为true
             channel.read();
         } else if (!autoRead && oldAutoRead) {
+            //autoRead从true变为false
             autoReadCleared();
         }
         return this;

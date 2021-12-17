@@ -27,6 +27,7 @@ import java.util.Map;
 public abstract class ChannelHandlerAdapter implements ChannelHandler {
 
     // Not using volatile because it's used only for a sanity check.
+    //是否被添加到pipeline中
     boolean added;
 
     /**
@@ -50,6 +51,8 @@ public abstract class ChannelHandlerAdapter implements ChannelHandler {
          * {@link Thread}s are quite limited anyway.
          *
          * See <a href="https://github.com/netty/netty/issues/2289">#2289</a>.
+         *
+         * 将channelHandler类中是否标注Sharable注解的标识缓存在threadLocal中，避免每次反射获取
          */
         Class<?> clazz = getClass();
         Map<Class<?>, Boolean> cache = InternalThreadLocalMap.get().handlerSharableCache();

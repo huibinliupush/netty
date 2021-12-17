@@ -81,6 +81,8 @@ public final class ChannelOutboundBuffer {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(ChannelOutboundBuffer.class);
 
+    //每次flush时，都会将ChannelOutboundBuffer中存储的byteBuffer（Netty实现）转换为JDK NIO实现的byteBuffer
+    //NIO_BUFFERS用于存放每次转换后的niobuffers。由于发送操作比较频繁 所以这里的niobuffers数组是复用的。一个reactor线程分配一个niobuffers数组用于存放每次需要发送的bytebuffer
     private static final FastThreadLocal<ByteBuffer[]> NIO_BUFFERS = new FastThreadLocal<ByteBuffer[]>() {
         @Override
         protected ByteBuffer[] initialValue() throws Exception {
@@ -845,7 +847,7 @@ public final class ChannelOutboundBuffer {
     }
 
     public static void main(String[] args) {
-        Entry entry = new Entry();
+        Entry[] entry = new Entry[3];
         System.out.println(ClassLayout.parseInstance(entry).toPrintable());
     }
 

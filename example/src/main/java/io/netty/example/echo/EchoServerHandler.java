@@ -37,7 +37,8 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) {
         //此处的msg就是Netty在read loop中从NioSocketChannel中读取到ByteBuffer
-        ChannelFuture future = ctx.write(msg);
+
+       ChannelFuture future = ctx.write(msg);
         future.addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
@@ -54,20 +55,20 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
             }
         });
         ctx.writeAndFlush(msg);
+        ctx.channel().write(msg);
+
     }
 
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) {
         //本次OP_READ事件处理完毕
         ctx.flush();
-        ctx.channel().flush();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         // Close the connection when an exception is raised.
-        cause.printStackTrace();
-        ctx.close();
+        ctx.fireExceptionCaught(cause);
     }
 
     @Override
@@ -78,5 +79,15 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         } else {
 
         }
+    }
+
+    @Override
+    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelRegistered();
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelActive();
     }
 }

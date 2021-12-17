@@ -19,11 +19,13 @@ import io.netty.util.concurrent.EventExecutor;
 
 final class DefaultChannelHandlerContext extends AbstractChannelHandlerContext {
 
+    //ChannelHandlerContext包裹的channelHandler
     private final ChannelHandler handler;
 
     DefaultChannelHandlerContext(
             DefaultChannelPipeline pipeline, EventExecutor executor, String name, ChannelHandler handler) {
         super(pipeline, executor, name, handler.getClass());
+        //包裹的channelHandler
         this.handler = handler;
     }
 

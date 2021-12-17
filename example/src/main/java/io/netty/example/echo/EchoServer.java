@@ -30,6 +30,7 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
+import io.netty.util.Recycler.Handle;
 
 /**
  * Echoes back any received data from a client.
@@ -61,6 +62,7 @@ public final class EchoServer {
              .option(ChannelOption.SO_BACKLOG, 100)//设置主Reactor中channel的属性
              .handler(new LoggingHandler(LogLevel.INFO))//设置主Reactor中Channel->pipline->handler
              .childOption(ChannelOption.WRITE_SPIN_COUNT,5)
+             .childOption(ChannelOption.SINGLE_EVENTEXECUTOR_PER_GROUP,true)
              .childHandler(new ChannelInitializer<SocketChannel>() {//设置从Reactor中注册channel的pipeline
                  @Override
                  public void initChannel(SocketChannel ch) throws Exception {
