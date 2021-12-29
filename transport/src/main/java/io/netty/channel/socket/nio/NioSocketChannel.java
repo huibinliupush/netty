@@ -27,6 +27,7 @@ import io.netty.channel.EventLoop;
 import io.netty.channel.FileRegion;
 import io.netty.channel.RecvByteBufAllocator;
 import io.netty.channel.nio.AbstractNioByteChannel;
+import io.netty.channel.nio.NioEventLoop;
 import io.netty.channel.socket.DefaultSocketChannelConfig;
 import io.netty.channel.socket.ServerSocketChannel;
 import io.netty.channel.socket.SocketChannelConfig;
@@ -156,6 +157,15 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     @UnstableApi
     @Override
+    /**
+     *
+     *  注意半关闭shutdownOutput不会将channel从reactor上deRegister，也就是说不会清理selectionKey，close方法会清理
+     *
+     *  所以需要定时清理selectionKeySet中的失效selectKey（半关闭引起）
+     *
+     *  @see NioEventLoop#cancel(java.nio.channels.SelectionKey)
+     *  @see io.netty.channel.nio.NioEventLoop#processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
+     * */
     protected final void doShutdownOutput() throws Exception {
         if (PlatformDependent.javaVersion() >= 7) {
             javaChannel().shutdownOutput();
@@ -164,6 +174,18 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         }
     }
 
+    /**
+     * close方法和shutdown方法都会发送fin
+     *
+     * 关闭连接的「写」这个方向，这就是常被称为「半关闭」的连接。如果发送缓冲区还有未发送的数据，将被立即发送出去，并发送一个 FIN 报文给对端
+     *
+     * 注意半关闭shutdownOutput不会将channel从reactor上deRegister，也就是说不会清理selectionKey，close方法会清理
+     *
+     * 所以需要定时清理selectionKeySet中的失效selectKey（半关闭引起）
+     *
+     * @see NioEventLoop#cancel(java.nio.channels.SelectionKey)
+     * @see io.netty.channel.nio.NioEventLoop#processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
+     * */
     @Override
     public ChannelFuture shutdownOutput() {
         return shutdownOutput(newPromise());
@@ -185,8 +207,14 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         return promise;
     }
 
+    /**
+     * 关闭连接的「读」这个方向，如果接收缓冲区有已接收的数据，则将会被丢弃，
+     * 并且后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。也就是说，对端还是会接收到 ACK，在这种情况下根本不知道数据已经被丢弃了。
+     *
+     * */
     @Override
     public ChannelFuture shutdownInput() {
+        //半关闭：关闭接收方向的通道，但发送方向的通道还没关闭
         return shutdownInput(newPromise());
     }
 
@@ -265,6 +293,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
     private void shutdownInput0(final ChannelPromise promise) {
         try {
+            //调用底层JDK socketChannel关闭接收方向的通道
             shutdownInput0();
             promise.setSuccess();
         } catch (Throwable t) {
@@ -275,6 +304,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     @SuppressJava6Requirement(reason = "Usage guarded by java version check")
     private void shutdownInput0() throws Exception {
         if (PlatformDependent.javaVersion() >= 7) {
+            //调用底层JDK socketChannel关闭接收方向的通道
             javaChannel().shutdownInput();
         } else {
             javaChannel().socket().shutdownInput();
@@ -495,6 +525,75 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         return new NioSocketChannelUnsafe();
     }
 
+
+
+
+    /**
+     *
+     *     SO_LINGER
+     *     Sets or gets the SO_LINGER option.  The argument is a
+     *     linger structure.
+     *
+     *     struct linger {
+     *         int l_onoff;     linger active
+     *         int l_linger;   how many seconds to linger for
+     *     };
+     *
+     *     When enabled, a close(2) or shutdown(2) will not return
+     *     until all queued messages for the socket have been
+     *     successfully sent or the linger timeout has been reached.
+     *             Otherwise, the call returns immediately and the closing is
+     *     done in the background.  When the socket is closed as part
+     *     of exit(2), it always lingers in the background.
+     *
+     * */
+
+
+    /**
+     *
+     *   在默认情况下,当调用close关闭socke的使用,close会立即返回,但是,如果send buffer中还有数据,系统会试着先把send buffer中的数据发送出去
+     *   SO_LINGER选项则是用来修改这种默认操作
+     *   影响close方法和shutdown方法的返回，l_onoff非零开启so_linger，l_linger逗留时间大于0
+     *   则调用close或者shutdown不会立即返回，而是需要等待socket对应的发送缓冲区的数据发送完毕并收到对应的ack
+     *   或者逗留时间超时，关闭方法才会返回。
+     *
+     *   如果socket设置的是非阻塞，那么close或者shutdown方法不会阻塞，而是通过返回值判断、
+     *   那么此时如果so_linger > 0 且socket发送缓冲区还有数据未发送时且linger超时时间未到，close將會返回一個EWOULDBLOCK的error
+     *   需要不断尝试调用close方法并判断其返回值
+     *   https://blog.csdn.net/songchuwang1868/article/details/90369445
+     * */
+
+    /**
+     *
+     * so_linger: https://stackoverflow.com/questions/3757289/when-is-tcp-option-so-linger-0-required
+     *            http://www.serverframework.com/asynchronousevents/2011/01/time-wait-and-its-design-implications-for-protocols-and-scalable-servers.html
+     *
+     * SO_LINGER设置为0：There's another way to terminate a TCP connection and that's by aborting the connection and sending an RST
+     * rather than a FIN. This is usually achieved by setting the SO_LINGER socket option to 0.
+     * This causes pending data to be discarded and the connection to be aborted with an RST rather than
+     * for the pending data to be transmitted and the connection closed cleanly with a FIN.
+     * It's important to realise that when a connection is aborted any data that might be in flow
+     * between the peers is discarded and the RST is delivered straight away; usually as an error which represents
+     * the fact that the "connection has been reset by the peer". The remote peer knows that the connection was aborted and
+     * neither peer enters TIME_WAIT.
+     *
+     * 那么调用 close 后，会立该发送一个 RST 标志给对端，该 TCP 连接将跳过四次挥手，也就跳过了 TIME_WAIT 状态，直接关闭。
+     *
+     * 关闭连接的最佳实践：
+     *
+     * The best way to do this is to never initiate an active close from the server,
+     * no matter what the reason. If your peer times out, abort the connection with an RST rather than closing it.
+     * If your peer sends invalid data, abort the connection, etc.
+     * The idea being that if your server never initiates an active close it can never accumulate TIME_WAIT sockets and
+     * therefore will never suffer from the scalability problems that they cause.
+     * Although it's easy to see how you can abort connections when error situations occur what about normal connection
+     * termination? Ideally you should design into your protocol a way for the server to tell the client that it should
+     * disconnect, rather than simply having the server instigate an active close.
+     * So if the server needs to terminate a connection the server sends an application level "we're done" message
+     * which the client takes as a reason to close the connection.
+     * If the client fails to close the connection in a reasonable time then the server aborts the connection.
+     *
+     * */
     private final class NioSocketChannelUnsafe extends NioByteUnsafe {
         @Override
         protected Executor prepareToClose() {
@@ -504,7 +603,24 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     // because we try to read or write until the actual close happens which may be later due
                     // SO_LINGER handling.
                     // See https://github.com/netty/netty/issues/4449
+
+                    //在设置SO_LINGER后，channel会延时关闭，在延时期间我们仍然可以进行读写，这样会导致io线程eventloop不断的循环浪费cpu资源
+                    //所以需要在延时关闭期间 将channel注册的事件全部取消。
+
+                    // We need to remove all registered events for a Channel from the EventLoop
+                    // before doing the actual close to ensure we not produce a cpu spin
+                    // when the actual close operation is delayed or executed outside of the EventLoop.
+                    //
+                    // Modifications:
+                    //
+                    // Deregister for events for NIO and EPOLL socket implementations when SO_LINGER is used.
                     doDeregister();
+
+                    /**
+                     * 该executor用于执行channel关闭的任务。
+                     * 注意channel关闭的任务不能在reactor中执行，因为reactor负责多个channel的IO事件的处理，不能因为执行close任务
+                     * 耽误其他channel上的IO事件处理
+                     * */
                     return GlobalEventExecutor.INSTANCE;
                 }
             } catch (Throwable ignore) {

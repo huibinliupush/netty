@@ -24,6 +24,9 @@ import io.netty.util.internal.UnstableApi;
 import java.util.concurrent.TimeUnit;
 
 @UnstableApi
+/**
+ * voidPromise不可添加listener，没有操作结果 更没有操作状态
+ * */
 public final class VoidChannelPromise extends AbstractFuture<Void> implements ChannelPromise {
 
     private final Channel channel;

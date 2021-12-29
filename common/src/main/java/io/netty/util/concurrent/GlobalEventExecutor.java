@@ -42,6 +42,7 @@ public final class GlobalEventExecutor extends AbstractScheduledEventExecutor im
 
     private static final long SCHEDULE_QUIET_PERIOD_INTERVAL = TimeUnit.SECONDS.toNanos(1);
 
+    //执行channel的关闭任务
     public static final GlobalEventExecutor INSTANCE = new GlobalEventExecutor();
 
     final BlockingQueue<Runnable> taskQueue = new LinkedBlockingQueue<Runnable>();

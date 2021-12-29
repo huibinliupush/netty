@@ -54,6 +54,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             ((AbstractNioUnsafe) unsafe()).flush0();
         }
     };
+    //表示Input已经shutdown了，再次对channel进行读取返回-1  设置该标志
     private boolean inputClosedSeenErrorOnRead;
 
     /**
@@ -93,7 +94,11 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
      *
      *   是否允许半关闭，当客户端发送fin主动关闭连接时（客户端发送通道关闭，但接收通道还没关闭），服务端回复ack 随后进入close_wait状态（服务端接收通道关闭，发送通道没有关闭）
      *   但是服务端允许在close_wait状态不调用close方法（从而无法发送fin到客户端）
-     *   此时客户端的状态为fin_wait_2，服务端的状态为close_wait  为半关闭状态
+     *   此时客户端的状态为fin_wait_2，服务端的状态为close_wait  为半关闭状态  调用的shutdown
+     *
+     *   如果调用的close方法则 无法实现半关闭
+     *
+     *   https://issues.redhat.com/browse/NETTY-236
      * */
     private static boolean isAllowHalfClosure(ChannelConfig config) {
         return config instanceof SocketChannelConfig &&
@@ -101,17 +106,62 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     }
 
     protected class NioByteUnsafe extends AbstractNioUnsafe {
-
+        /**
+         * 此时客户端的状态为fin_wait2 服务端的状态为close_wait
+         * 如果客户端是调用的close方法发送的fin,则进入全关闭状态，在fin_wait2不能接受服务端的数据，直接返回rst给服务端，但服务端在close_wait状态还可以向客户端发送数据，只是客户端不在接受
+         * 如果客户端调用的是shutdown方法发送fin,则进入半关闭状态，只是将发送方向的通道关闭，但还没有关闭接受通道还是可以接受服务端的数据在fin_wait2，但是这个状态是有超时时间限制的由操作系统控制
+         *
+         * 这里的逻辑是服务端在收到客户端的fin并回复ack给客户端后进入close_wait状态，需要调用close方法给客户端发送fin 结束close_wait状态进行last_ack状态
+         *
+         * 如果进程异常退出了，内核就会发送 RST 报文来关闭，它可以不走四次挥手流程，是一个暴力关闭连接的方式。
+         *
+         * 安全关闭连接的方式必须通过四次挥手，它由进程调用 close 和 shutdown 函数发起 FIN 报文（
+         * shutdown 参数须传入 SHUTWR（关闭写） 或者 SHUTRDWR（同时关闭读写） 才会发送 FIN）。关闭读不会发送fin
+         *
+         * 这里无论服务端还是客户端在收到fin的时候 在支持半关闭的情况下，首先都需要shutdwon input
+         *
+         * 1:客户端shutdownOutput 发送fin 到服务端。服务端回复ack后，会触发read事件走到这里，首先需要shutdownInput。随后调用close或者shutdownOutput结束close_wait状态
+         * 2:服务端调用close或者shutdownOutput结束close_wait状态后，客户端会收到服务端的fin，客户端触发read事件走到这里，shutdownInput
+         * */
         private void closeOnRead(ChannelPipeline pipeline) {
+            //判断接收方向是否关闭，这里肯定是没有关闭的
             if (!isInputShutdown0()) {
+                //如果接收方向还没有关闭 继续判断是否支持半关闭（客户端可以继续接收数据但不能发送数据，服务端可以继续发送数据但不能接受数据）
                 if (isAllowHalfClosure(config())) {
+                    // 如果支持半关闭，服务端这里需要首先关闭接收方向的通道，语义是不在接受新的数据，但是可以继续发送数据
+                    // 注意调用shutdownInput后channel不会关闭，只是说服务端在close_wait状态还可以继续发送数据，但不能接收数据，但状态还是close_wait状态
+                    // 直到服务端主动调用shutdownOutput，向客户端发送fin 才能结束close_wait状态进入last-ack
+                    // shutdownInput不会发送fin   shutdownOutput才会发送fin
                     shutdownInput();
+                    //pipeline中触发userEvent事件 -> ChannelInputShutdownEvent
+                    //通知用户此时，channel的接收方法通道已经关闭 不在接受新的数据,注意此时channel并没有关闭
+                    //可以在ChannelInputShutdownEvent事件回调中 继续向客户端发送数据，然后调用shutdownOutput向客户端发送fin
+                    //结束服务端的close_wait状态进入last_ack，客户端结束fin_wait2状态进入time_wait
                     pipeline.fireUserEventTriggered(ChannelInputShutdownEvent.INSTANCE);
                 } else {
+                    //如果不支持半关闭，则服务端直接调用close方法向客户端发送fin,结束close_wait状态进如last_ack状态
                     close(voidPromise());
                 }
             } else {
+                /**
+                 * https://github.com/netty/netty/commit/ed0668384b393c3502c2136e3cc412a5c8c9056e
+                 * No more read spin loop in NIO when the channel is half closed.
+                 *
+                 * 关闭channel的input后，如果接收缓冲区有已接收的数据，则将会被丢弃，
+                 * 后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。但是reactor还是会触发read事件，只不过此时对channel进行read
+                 * 会返回-1。
+                 *
+                 * 这里和服务端收到fin一样，也是触发read事件，对channel读取会返回-1
+                 *
+                 * 这里的逻辑是当channel的input关闭后，如果还在接收数据，虽然数据会被丢弃，但是reactor还是会触发read事件，从而走到这里
+                 *
+                 * 设置inputClosedSeenErrorOnRead = true 如果下次在接收到数据 就将read事件从reactor上取消掉，停止读取
+                 * 触发ChannelInputShutdownReadComplete 表示后续不会在进行读取了 保证只会被触发一次
+                 *
+                 * */
+                //inputShutDown后在对channel进行读取则会直接返回-1，这样就会走到这个分支
                 inputClosedSeenErrorOnRead = true;
+                //当input已经shutdown了 还要对channel进行读取，则会触发ChannelInputShutdownReadComplete事件
                 pipeline.fireUserEventTriggered(ChannelInputShutdownReadComplete.INSTANCE);
             }
         }
@@ -143,6 +193,21 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             //如果inputClosedSeenErrorOnRead = true ，移除对SelectionKey.OP_READ事件。
             //inputClosedSeenErrorOnRead表示当前channel读取通道已经关闭（close_wait状态），closeOnRead方法中设置
             if (shouldBreakReadReady(config)) {
+                /**
+                 * https://github.com/netty/netty/commit/ed0668384b393c3502c2136e3cc412a5c8c9056e
+                 * No more read spin loop in NIO when the channel is half closed.
+                 *
+                 * 关闭channel的input后，如果接收缓冲区有已接收的数据，则将会被丢弃，
+                 * 后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。但是reactor还是会触发read事件，只不过此时对channel进行read
+                 * 会返回-1。
+                 *
+                 * 这里和服务端收到fin一样，也是触发read事件，对channel读取会返回-1
+                 *
+                 * 这里的逻辑是当channel的input关闭后，如果还在接收数据，就将read事件取消掉，避免继续read loop导致消耗不必要的CPU消耗
+                 * @see SocketHalfClosedTest
+                 * */
+
+
                 clearReadPending();
                 return;
             }

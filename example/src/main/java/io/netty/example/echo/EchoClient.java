@@ -57,7 +57,7 @@ public final class EchoClient {
             Bootstrap b = new Bootstrap();
             b.group(group)
              .channel(NioSocketChannel.class)
-             .option(ChannelOption.TCP_NODELAY, true)
+             .option(ChannelOption.TCP_NODELAY, true)//开启nagle算法
              .handler(new ChannelInitializer<SocketChannel>() {
                  @Override
                  public void initChannel(SocketChannel ch) throws Exception {

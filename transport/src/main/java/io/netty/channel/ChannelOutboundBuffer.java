@@ -106,6 +106,7 @@ public final class ChannelOutboundBuffer {
     private int nioBufferCount;
     private long nioBufferSize;
 
+    //在关闭channel之后 执行清理channelOutboundBuffer操作的标识
     private boolean inFail;
 
     //水位线指针
@@ -706,6 +707,8 @@ public final class ChannelOutboundBuffer {
         try {
             inFail = true;
             for (;;) {
+                // 循环清除channelOutboundBuffer中的待发送数据
+                // 将entry从buffer中删除，并释放entry中的bytebuffer，通知promise failed
                 if (!remove0(cause, notify)) {
                     break;
                 }
@@ -737,6 +740,7 @@ public final class ChannelOutboundBuffer {
         }
 
         // Release all unflushed messages.
+        //循环清理channelOutboundBuffer中的unflushedEntry，因为在执行关闭之前有可能用户有一些数据write进来，需要清理掉
         try {
             Entry e = unflushedEntry;
             while (e != null) {
@@ -745,7 +749,9 @@ public final class ChannelOutboundBuffer {
                 TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, -size);
 
                 if (!e.cancelled) {
+                    //释放unflushedEntry中的bytebuffer
                     ReferenceCountUtil.safeRelease(e.msg);
+                    //通知unflushedEntry中的promise failed
                     safeFail(e.promise, cause);
                 }
                 e = e.recycleAndGetNext();
@@ -753,6 +759,7 @@ public final class ChannelOutboundBuffer {
         } finally {
             inFail = false;
         }
+        //清理channel用于缓存JDK nioBuffer的 threadLocal缓存NIO_BUFFERS
         clearNioBuffers();
     }
 
@@ -847,7 +854,7 @@ public final class ChannelOutboundBuffer {
     }
 
     public static void main(String[] args) {
-        Entry[] entry = new Entry[3];
+        char[] entry = new char[3];
         System.out.println(ClassLayout.parseInstance(entry).toPrintable());
     }
 

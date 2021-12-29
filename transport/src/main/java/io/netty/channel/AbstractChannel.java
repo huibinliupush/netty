@@ -16,6 +16,7 @@
 package io.netty.channel;
 
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.channel.nio.NioEventLoop;
 import io.netty.channel.socket.ChannelOutputShutdownEvent;
 import io.netty.channel.socket.ChannelOutputShutdownException;
 import io.netty.util.DefaultAttributeMap;
@@ -51,7 +52,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     private final Unsafe unsafe;
     //为channel分配独立的pipeline用于IO事件编排
     private final DefaultChannelPipeline pipeline;
+    //关闭channel时 传入的voidPromise
     private final VoidChannelPromise unsafeVoidPromise = new VoidChannelPromise(this, false);
+    //关闭channel操作的指定future，来判断关闭流程进度 每个channel一个
     private final CloseFuture closeFuture = new CloseFuture(this);
 
     private volatile SocketAddress localAddress;
@@ -59,6 +62,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     //channel绑定的Reactor
     private volatile EventLoop eventLoop;
     private volatile boolean registered;
+    //channel的关闭流程是否已经开始
     private boolean closeInitiated;
     private Throwable initialCloseCause;
 
@@ -677,6 +681,12 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
          * Shutdown the output portion of the corresponding {@link Channel}.
          * For example this will clean up the {@link ChannelOutboundBuffer} and not allow any more writes.
          * @param cause The cause which may provide rational for the shutdown.
+         *
+         *  注意半关闭shutdownOutput不会将channel从reactor上deRegister，也就是说不会清理selectionKey，close方法会清理
+         *  所以需要定时清理selectionKeySet中的失效selectKey（半关闭引起）
+         *
+         *  @see NioEventLoop#cancel(java.nio.channels.SelectionKey)
+         *  @see io.netty.channel.nio.NioEventLoop#processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
          */
         private void shutdownOutput(final ChannelPromise promise, Throwable cause) {
             if (!promise.setUncancellable()) {
@@ -730,23 +740,38 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         private void closeOutboundBufferForShutdown(
                 ChannelPipeline pipeline, ChannelOutboundBuffer buffer, Throwable cause) {
+            //shutdownOutput半关闭后需要清理channelOutboundBuffer中的待发送数据flushedEntry
             buffer.failFlushed(cause, false);
+            //循环清理channelOutboundBuffer中的unflushedEntry
             buffer.close(cause, true);
             pipeline.fireUserEventTriggered(ChannelOutputShutdownEvent.INSTANCE);
         }
 
+        /**
+         *
+         * 如果是主动关闭方 这里的channelPromise 不会是 voidPromise，因为需要监听关闭的结果
+         *
+         * 如果是被动关闭方 这里的channelPromise 是voidPromise
+         *
+         * */
         private void close(final ChannelPromise promise, final Throwable cause,
                            final ClosedChannelException closeCause, final boolean notify) {
             if (!promise.setUncancellable()) {
+                //关闭操作如果被取消则直接返回
                 return;
             }
 
             if (closeInitiated) {
+
+                //如果此时channel已经开始关闭流程，则进入这里
+
                 if (closeFuture.isDone()) {
                     // Closed already.
+                    //如果channel已经关闭 则设置promise为success，如果promise是voidPromise类型则会跳过
                     safeSetSuccess(promise);
                 } else if (!(promise instanceof VoidChannelPromise)) { // Only needed if no VoidChannelPromise.
                     // This means close() was called before so we just register a listener and return
+                    //如果promise不是voidPromise，则会在关闭完成后 通过closeFuture设置promise success
                     closeFuture.addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(ChannelFuture future) throws Exception {
@@ -757,11 +782,16 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //当前channel现在开始进入正在关闭状态
             closeInitiated = true;
-
+            //当前channel是否active，这里肯定是active的
             final boolean wasActive = isActive();
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            //将channel对应的写缓冲区channelOutboundBuffer设置为null 表示channel要关闭了
+            //此时如果还在write数据，则直接释放bytebuffer，并立马 fail 相关writeFuture 并抛出newClosedChannelException异常
+            //此时如果执行flush，则会直接返回
             this.outboundBuffer = null; // Disallow adding any messages and flushes to outboundBuffer.
+            //如果开启了SO_LINGER，则需要先将channel从reactor中取消掉。避免reactor线程空转浪费cpu
             Executor closeExecutor = prepareToClose();
             if (closeExecutor != null) {
                 closeExecutor.execute(new Runnable() {
@@ -769,17 +799,24 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     public void run() {
                         try {
                             // Execute the close.
+                            // 在GlobalEventExecutor中执行channel的关闭任务,设置closeFuture,promise success
                             doClose0(promise);
                         } finally {
                             // Call invokeLater so closeAndDeregister is executed in the EventLoop again!
+                            // reactor线程中执行
                             invokeLater(new Runnable() {
                                 @Override
                                 public void run() {
                                     if (outboundBuffer != null) {
                                         // Fail all the queued messages
+                                        // cause = closeCause = ClosedChannelException, notify = false
+                                        // 此时channel已经关闭，需要清理对应channelOutboundBuffer中的待发送数据flushedEntry
                                         outboundBuffer.failFlushed(cause, notify);
+                                        //循环清理channelOutboundBuffer中的unflushedEntry
                                         outboundBuffer.close(closeCause);
                                     }
+                                    //这里的active = true
+                                    //关闭channel后，会将channel从reactor中注销，首先触发ChannelInactive事件，然后触发ChannelUnregistered
                                     fireChannelInactiveAndDeregister(wasActive);
                                 }
                             });
@@ -797,6 +834,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         outboundBuffer.close(closeCause);
                     }
                 }
+
+                //如果此时channel正在进行flush操作
                 if (inFlush0) {
                     invokeLater(new Runnable() {
                         @Override
@@ -812,16 +851,34 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         private void doClose0(ChannelPromise promise) {
             try {
+                //关闭channel，此时服务端向客户端发送fin2，服务端进入last_ack状态，客户端收到fin2进入time_wait状态
                 doClose();
+                //设置clostFuture的状态为success，表示channel已经关闭
                 closeFuture.setClosed();
+                //通知用户promise success,关闭操作已经完成
                 safeSetSuccess(promise);
             } catch (Throwable t) {
+                /**
+                 *
+                 *   在默认情况下,当调用close关闭socke的使用,close会立即返回,但是,如果send buffer中还有数据,系统会试着先把send buffer中的数据发送出去
+                 *   SO_LINGER选项则是用来修改这种默认操作
+                 *   影响close方法和shutdown方法的返回，l_onoff非零开启so_linger，l_linger逗留时间大于0
+                 *   则调用close或者shutdown不会立即返回，而是需要等待socket对应的发送缓冲区的数据发送完毕并收到对应的ack
+                 *   或者逗留时间超时，关闭方法才会返回。
+                 *
+                 *   如果socket设置的是非阻塞，那么close或者shutdown方法不会阻塞，而是通过返回值判断、
+                 *   那么此时如果so_linger > 0 且socket发送缓冲区还有数据未发送时且linger超时时间未到，close將會返回一個EWOULDBLOCK的error
+                 *   需要不断尝试调用close方法并判断其返回值
+                 *   https://blog.csdn.net/songchuwang1868/article/details/90369445
+                 * */
                 closeFuture.setClosed();
                 safeSetFailure(promise, t);
             }
         }
 
         private void fireChannelInactiveAndDeregister(final boolean wasActive) {
+            //wasActive && !isActive() 条件表示 channel的状态第一次从active变为 inactive
+            //这里的wasActive = true  isActive()= false
             deregister(voidPromise(), wasActive && !isActive());
         }
 
@@ -839,10 +896,17 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         @Override
         public final void deregister(final ChannelPromise promise) {
             assertEventLoop();
-
+            //用户在pipeline中触发的deregister事件，此时channel还没有关闭 不能触发ChannelInactive事件
             deregister(promise, false);
         }
 
+        /**
+         *
+         * 关闭channel后，会将channel从reactor中注销，首先触发ChannelInactive事件，然后触发ChannelUnregistered
+         *
+         * 而在接收channel之后，channel向reactor中注册成功后，会首先触发ChannelRegistered 然后触发ChannelActive
+         *
+         * */
         private void deregister(final ChannelPromise promise, final boolean fireChannelInactive) {
             if (!promise.setUncancellable()) {
                 return;
@@ -862,15 +926,26 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             //
             // See:
             // https://github.com/netty/netty/issues/4435
+
+
+            /**
+             * 延后真正的deRegister操作，当前pipeline中还有事件传播，deregister() 方法可能是在某个事件回调中被触发
+             * 此时旧的reactor正在处理pipeline上的事件，并且同时channel可能已经注册到新的reactor上，旧reactor还未处理完的数据理应
+             * 继续在旧的reactor中处理，如果此时我们立马执行deRegister，未处理完的数据就会在新的reactor上处理，这样就会导致一个handler被多个线程
+             * 处理导致线程安全问题。所以需要延后deRegister的操作。
+             *
+             * */
             invokeLater(new Runnable() {
                 @Override
                 public void run() {
                     try {
+                        //将channel从reactor中注销，reactor不在监听channel上的事件
                         doDeregister();
                     } catch (Throwable t) {
                         logger.warn("Unexpected exception occurred while deregistering a channel.", t);
                     } finally {
                         if (fireChannelInactive) {
+                            //当channel被关闭后，触发ChannelInactive事件
                             pipeline.fireChannelInactive();
                         }
                         // Some transports like local and AIO does not allow the deregistration of
@@ -878,9 +953,12 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         // close() calls deregister() again - no need to fire channelUnregistered, so check
                         // if it was registered.
                         if (registered) {
+                            //如果channel没有注册，则不需要触发ChannelUnregistered
                             registered = false;
+                            //随后触发ChannelUnregistered
                             pipeline.fireChannelUnregistered();
                         }
+                        //通知deRegisterPromise
                         safeSetSuccess(promise);
                     }
                 }
@@ -1088,6 +1166,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             close(voidPromise());
         }
 
+        /**
+         * 用于在outbound回调中触发inbound回调，比如close中触发inActive 需要延后触发
+         * 因为outbound回调有可能又是在inbound中触发的
+         *
+         * */
         private void invokeLater(Runnable task) {
             try {
                 // This method is used by outbound operation implementations to trigger an inbound event later.
@@ -1177,6 +1260,13 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     /**
      * Called when conditions justify shutting down the output portion of the channel. This may happen if a write
      * operation throws an exception.
+     *
+     *          * 注意半关闭shutdownOutput不会将channel从reactor上deRegister，也就是说不会清理selectionKey，close方法会清理
+     *          *
+     *          * 所以需要定时清理selectionKeySet中的失效selectKey（半关闭引起）
+     *          *
+     *          * @see NioEventLoop#cancel(java.nio.channels.SelectionKey)
+     *          * @see io.netty.channel.nio.NioEventLoop#processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
      */
     @UnstableApi
     protected void doShutdownOutput() throws Exception {

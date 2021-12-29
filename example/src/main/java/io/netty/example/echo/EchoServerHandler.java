@@ -20,6 +20,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.socket.SocketChannel;
 
 /**
  * Handler implementation for the echo server.
@@ -56,6 +57,16 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         });
         ctx.writeAndFlush(msg);
         ctx.channel().write(msg);
+
+
+
+        ctx.channel().close();
+        ctx.deregister();
+        ctx.channel().deregister();
+        //ctx.channel().unsafe().register();
+        SocketChannel sc = (SocketChannel) ctx.channel();
+        //半关闭
+        sc.shutdownOutput();
 
     }
 

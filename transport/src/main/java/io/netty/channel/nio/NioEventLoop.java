@@ -674,6 +674,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         //当从selector中移除的socketChannel数量达到256个，设置needsToSelectAgain为true
         // 在io.netty.channel.nio.NioEventLoop.processSelectedKeysPlain 中重新做一次轮询，将失效的selectKey移除，
         // 以保证selectKeySet的有效性
+        // 因为调用shutdownOutput半关闭channel的时候不会清理selectionkey，虽然已经失效了但是不会从selectKeySet中移除
         if (cancelledKeys >= CLEANUP_INTERVAL) {
             cancelledKeys = 0;
             needsToSelectAgain = true;
