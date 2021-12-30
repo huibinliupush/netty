@@ -196,20 +196,42 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 /**
                  * https://github.com/netty/netty/commit/ed0668384b393c3502c2136e3cc412a5c8c9056e
                  * No more read spin loop in NIO when the channel is half closed.
+                 * https://www.excentis.com/blog/tcp-half-close-cool-feature-now-broken
                  *
-                 * 关闭channel的input后，如果接收缓冲区有已接收的数据，则将会被丢弃，
-                 * 后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。但是reactor还是会触发read事件，只不过此时对channel进行read
-                 * 会返回-1。
+                 * 关闭channel的input后，注意不能读的意思内核不能再往内核缓冲区中增加新的内容。已经在内核缓冲区中的内容，用户态依然能够读取到。
+                 * 后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。
                  *
                  * 这里和服务端收到fin一样，也是触发read事件，对channel读取会返回-1
                  *
-                 * 这里的逻辑是当channel的input关闭后，如果还在接收数据，就将read事件取消掉，避免继续read loop导致消耗不必要的CPU消耗
+                 * close和shutdownOutput均会向对端发送fin，当对端接收到fin报文，内核会返回ack,然后将EOF描述符放入socket的接收缓存区中
+                 * 此时socket上的read事件活跃，epoll会通知。但是这里需要注意在这种因为对端关闭连接触发的read事件，epoll会一直通知，也就是说
+                 * 这里的read方法会一直不断的执行，空转。直到服务端执行close结束close_wait装填
+                 *
+                 * close方法不会出现空转的原因是，调用jdk底层的close，会将channel对应的selectionkey从selector上cancel掉，所以
+                 * 调用close方法关闭的channel不会一直被通知read事件活跃。
+                 *
+                 * 而调用shutdownOutput进行半关闭的channel就会一直空转，因为调用jdk底层shutdownOutput方法，不会cancel对应的selectionKey
+                 * 这也是合理的，因为调用shutdownOutput在半关闭的状态下，channel还会希望处理读事件，所以不会从selector上cancel。
+                 *
+                 * 比如：客户端调用shutdownOutput，服务端在这里会调用shutdownInput，服务端channel并不会从reactor上cancel。
+                 * 由于selectionKey在半关闭的状态下不会被cancel，而epoll会不停地通知read事件（其实是关闭事件），导致这里的read方法一直空转
+                 *
+                 * https://stackoverflow.com/questions/52976152/tcp-when-is-epollhup-generated
+                 *
+                 * 主动关闭方调用close或者shutdownOutput，服务端epoll会触发EPOLLRDHUP事件
+                 *  EPOLLRDHUP (since Linux 2.6.17)
+                 *               Stream socket peer closed connection, or shut down writing
+                 *               half of connection.  (This flag is especially useful for
+                 *               writing simple code to detect peer shutdown when using
+                 *               edge-triggered monitoring.)
+                 *
+                 * 在半关闭的状态下 这里的逻辑是当channel的input关闭后，就将read事件取消掉，避免继续read loop导致消耗不必要的CPU消耗
+                 * 因为epoll会一直通知，因为不管是任何方向的shutdown,都不会关闭连接，除非调用close。这种情况下epoll认为服务端并没有处理
+                 * 关闭连接，所以一直会通知这个read事件
                  * @see SocketHalfClosedTest
                  * */
-
-
-                clearReadPending();
-                return;
+                //clearReadPending();
+                //return;
             }
             final ChannelPipeline pipeline = pipeline();
             //PooledByteBufAllocator ByteBuf具体的分配器
@@ -235,7 +257,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     //记录本次读取了多少字节数
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
                     //如果本次没有读取到任何字节，则退出循环 进行下一轮事件轮询
-                    // -1 表示客户端主动关闭了连接
+                    // -1 表示客户端主动关闭了连接close或者shutdownOutput 这里均会返回-1
                     if (allocHandle.lastBytesRead() <= 0) {
                         // nothing was read. release the buffer.
                         byteBuf.release();
@@ -268,6 +290,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 if (close) {
                     //此时客户端发送fin1（fi_wait_1状态）主动关闭连接，服务端接收到fin，并回复ack进入close_wait状态
                     //在服务端进入close_wait状态 需要调用close 方法向客户端发送fin_ack，服务端才能结束close_wait状态
+                    System.out.println("通知 read");
                     closeOnRead(pipeline);
                 }
             } catch (Throwable t) {

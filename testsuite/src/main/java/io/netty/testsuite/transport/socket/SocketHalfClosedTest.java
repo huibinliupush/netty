@@ -33,6 +33,7 @@ import io.netty.channel.socket.ChannelInputShutdownEvent;
 import io.netty.channel.socket.ChannelInputShutdownReadComplete;
 import io.netty.channel.socket.ChannelOutputShutdownEvent;
 import io.netty.channel.socket.DuplexChannel;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.util.UncheckedBooleanSupplier;
 import io.netty.util.internal.PlatformDependent;
 import org.junit.Assume;
@@ -65,7 +66,10 @@ public class SocketHalfClosedTest extends AbstractSocketTest {
                     ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                         @Override
                         public void channelActive(ChannelHandlerContext ctx) {
-                            ((DuplexChannel) ctx).shutdownOutput();
+                            //((DuplexChannel) ctx).shutdownOutput();
+                            SocketChannel socketChannel = (SocketChannel)ctx.channel();
+                            socketChannel.shutdownOutput();
+                            //ctx.close();
                         }
 
                         @Override
@@ -86,13 +90,19 @@ public class SocketHalfClosedTest extends AbstractSocketTest {
 
                         @Override
                         public void userEventTriggered(final ChannelHandlerContext ctx, Object evt) {
+
+                            final SocketChannel socketChannel = (SocketChannel)ctx.channel();
+
                             if (evt == ChannelInputShutdownEvent.INSTANCE) {
                                 shutdownEventReceivedCounter.incrementAndGet();
+
                             } else if (evt == ChannelInputShutdownReadComplete.INSTANCE) {
                                 shutdownReadCompleteEventReceivedCounter.incrementAndGet();
                                 ctx.executor().schedule(new Runnable() {
                                     @Override
                                     public void run() {
+
+                                        //socketChannel.shutdownOutput();对端需要调用close，shutdown无法关闭连接 还会不停触发read事件
                                         ctx.close();
                                     }
                                 }, 100, MILLISECONDS);

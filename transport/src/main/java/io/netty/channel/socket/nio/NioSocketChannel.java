@@ -208,7 +208,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     /**
-     * 关闭连接的「读」这个方向，如果接收缓冲区有已接收的数据，则将会被丢弃，
+     * 关闭连接的「读」这个方向，注意不能读的意思内核不能再往内核缓冲区中增加新的内容。已经在内核缓冲区中的内容，用户态依然能够读取到。
      * 并且后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。也就是说，对端还是会接收到 ACK，在这种情况下根本不知道数据已经被丢弃了。
      *
      * */
@@ -578,6 +578,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
      * neither peer enters TIME_WAIT.
      *
      * 那么调用 close 后，会立该发送一个 RST 标志给对端，该 TCP 连接将跳过四次挥手，也就跳过了 TIME_WAIT 状态，直接关闭。
+     * 主动发FIN包方必然会进入TIME_WAIT状态，除非不发送FIN而直接以发送RST结束连接。
      *
      * 关闭连接的最佳实践：
      *
