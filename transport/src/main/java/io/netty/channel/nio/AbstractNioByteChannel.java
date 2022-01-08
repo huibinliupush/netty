@@ -135,7 +135,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     shutdownInput();
                     //pipeline中触发userEvent事件 -> ChannelInputShutdownEvent
                     //通知用户此时，channel的接收方法通道已经关闭 不在接受新的数据,注意此时channel并没有关闭
-                    //可以在ChannelInputShutdownEvent事件回调中 继续向客户端发送数据，然后调用shutdownOutput向客户端发送fin
+                    //可以在ChannelInputShutdownEvent事件回调中 继续向客户端发送数据，然后调用close向客户端发送fin
                     //结束服务端的close_wait状态进入last_ack，客户端结束fin_wait2状态进入time_wait
                     pipeline.fireUserEventTriggered(ChannelInputShutdownEvent.INSTANCE);
                 } else {
@@ -159,9 +159,13 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                  * 触发ChannelInputShutdownReadComplete 表示后续不会在进行读取了 保证只会被触发一次
                  *
                  * */
-                //inputShutDown后在对channel进行读取则会直接返回-1，这样就会走到这个分支
+                //在连接半关闭的情况下，JDK NIO Selector会不停的通知OP_READ事件活跃，不停的执行read方法
+                //到这里，Selector已经是第二次通知OP_READ事件活跃
                 inputClosedSeenErrorOnRead = true;
-                //当input已经shutdown了 还要对channel进行读取，则会触发ChannelInputShutdownReadComplete事件
+                // 在连接半关闭的情况下，JDK NIO Selector会不停的通知OP_READ事件活跃，
+                // 当用户处理完ChannelInputShutdownEvent事件后，马上会来到这里。
+                // 此时被动关闭方的待处理数据已经ChannelInputShutdownEvent事件中处理完毕并且发送给了对端，
+                // 这里会触发ChannelInputShutdownReadComplete事件，用户可以在这个事件中调用close方法关闭连接结束close_wait
                 pipeline.fireUserEventTriggered(ChannelInputShutdownReadComplete.INSTANCE);
             }
         }
@@ -171,6 +175,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             if (byteBuf != null) {
                 if (byteBuf.isReadable()) {
                     readPending = false;
+                    //如果发生异常时，已经读取到了部分数据，则触发ChannelRead事件
                     pipeline.fireChannelRead(byteBuf);
                 } else {
                     byteBuf.release();
@@ -230,8 +235,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                  * 关闭连接，所以一直会通知这个read事件
                  * @see SocketHalfClosedTest
                  * */
-                //clearReadPending();
-                //return;
+                clearReadPending();
+                return;
             }
             final ChannelPipeline pipeline = pipeline();
             //PooledByteBufAllocator ByteBuf具体的分配器
@@ -290,10 +295,15 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 if (close) {
                     //此时客户端发送fin1（fi_wait_1状态）主动关闭连接，服务端接收到fin，并回复ack进入close_wait状态
                     //在服务端进入close_wait状态 需要调用close 方法向客户端发送fin_ack，服务端才能结束close_wait状态
-                    System.out.println("通知 read");
                     closeOnRead(pipeline);
                 }
             } catch (Throwable t) {
+                //收到RST包时 OP_READ事件活跃
+                //当我们正在读取数据的时候，遇到对端发送RST强制关闭连接，就会抛出IOExcetion
+                //  发送RST强制关闭连接，这将导致之前已经发送但尚未送达的、或是已经进入对端 receive buffer
+                //  但还未被对端应用程序处理的数据被对端无条件丢弃，对端应用程序可能出现异常
+                //https://jiroujuan.wordpress.com/2013/09/05/rst-and-exceptions-when-closing-socket-in-java/
+                //https://www.mianshigee.com/note/detail/105368qmn/
                 handleReadException(pipeline, byteBuf, t, close, allocHandle);
             } finally {
                 // Check if there is a readPending which was not processed yet.
@@ -305,6 +315,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
                 /**
                  * autoread提供一种背压机制。防止oom
+                 *
+                 * 这里需要注意当设置autoRead = false后，需要将本次接收数据全部接收完毕(readPending = false) 才会removeReadOp
                  *
                  * If you have not set autoread to false you may get into trouble
                  * if one channel writes a lot of data before the other can consume it.

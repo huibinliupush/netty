@@ -17,8 +17,15 @@ package io.netty.example.echo;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.socket.ChannelInputShutdownEvent;
+import io.netty.channel.socket.ChannelInputShutdownReadComplete;
+import io.netty.channel.socket.ChannelOutputShutdownEvent;
+import io.netty.channel.socket.DuplexChannel;
+import io.netty.channel.socket.SocketChannel;
 
 /**
  * Handler implementation for the echo client.  It initiates the ping-pong
@@ -40,21 +47,29 @@ public class EchoClientHandler extends ChannelInboundHandlerAdapter {
     }
 
     @Override
-    public void channelActive(ChannelHandlerContext ctx) {
-        ctx.writeAndFlush(firstMessage);
+    public void channelActive(final ChannelHandlerContext ctx) {
+        System.out.println("client send first message");
+        ctx.writeAndFlush(firstMessage).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                SocketChannel channel = (SocketChannel)future.channel();
+                channel.shutdownOutput();
+               // channel.close();
+            }
+        });
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
-
-        ctx.write(msg);
+        System.out.println("client recv data half close in fin_wait2");
+        //ctx.write(msg);
     }
 
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) {
 
        //ctx.flush();
-       ctx.close();
+       //ctx.close();
     }
 
     @Override
@@ -62,5 +77,21 @@ public class EchoClientHandler extends ChannelInboundHandlerAdapter {
         // Close the connection when an exception is raised.
         cause.printStackTrace();
         ctx.close();
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (ChannelInputShutdownEvent.INSTANCE == evt) {
+
+        }
+
+        if (ChannelInputShutdownReadComplete.INSTANCE == evt) {
+
+        }
+
+        if (ChannelOutputShutdownEvent.INSTANCE == evt) {
+
+            System.out.println("client shutdown out put");
+        }
     }
 }

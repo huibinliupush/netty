@@ -377,6 +377,8 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     protected int doReadBytes(ByteBuf byteBuf) throws Exception {
         final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
         allocHandle.attemptedBytesRead(byteBuf.writableBytes());
+        //读到EOF后，这里会返回-1
+        //如果在读取的过程中遇到EOF,或者遇到RST包，将会抛出IOException
         return byteBuf.writeBytes(javaChannel(), allocHandle.attemptedBytesRead());
     }
 
@@ -535,7 +537,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
      *     linger structure.
      *
      *     struct linger {
-     *         int l_onoff;     linger active
+     *         int l_onoff;    linger active
      *         int l_linger;   how many seconds to linger for
      *     };
      *
@@ -556,11 +558,14 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
      *   影响close方法和shutdown方法的返回，l_onoff非零开启so_linger，l_linger逗留时间大于0
      *   则调用close或者shutdown不会立即返回，而是需要等待socket对应的发送缓冲区的数据发送完毕并收到对应的ack
      *   或者逗留时间超时，关闭方法才会返回。
-     *
-     *   如果socket设置的是非阻塞，那么close或者shutdown方法不会阻塞，而是通过返回值判断、
-     *   那么此时如果so_linger > 0 且socket发送缓冲区还有数据未发送时且linger超时时间未到，close將會返回一個EWOULDBLOCK的error
-     *   需要不断尝试调用close方法并判断其返回值
      *   https://blog.csdn.net/songchuwang1868/article/details/90369445
+     *
+     *   在 Linux 上，设置 SO_LINGER 且使用非零值延迟时间会导致应用程序阻塞，即使程序创建的是一个 non-blocking socket。
+     *   由于 Linux 的实现问题，即使程序使用的 non-blocking sockets，lingering 也会导致程序阻塞，
+     *   自行编写 socket 程序使用 lingering 的配置应当慎重，至少不应该为了避免 TIME_WAIT 堆积而使用 lingering。
+     *   https://www.starduster.me/2019/07/06/socket-lingering-and-closing/
+     *
+     *   linux开启SO_LINGER时，如果设置l_linger为非0， 不管是阻塞socket，非阻塞socket， 在这里都会发生阻塞， 而并不是UNP所讲到的( 非阻塞socket会立即返回EWOULDBLOCK)
      * */
 
     /**
@@ -576,6 +581,9 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
      * between the peers is discarded and the RST is delivered straight away; usually as an error which represents
      * the fact that the "connection has been reset by the peer". The remote peer knows that the connection was aborted and
      * neither peer enters TIME_WAIT.
+     *
+     * 发送RST强制关闭连接，这将导致之前已经发送但尚未送达的、或是已经进入对端 receive buffer
+     * 但还未被对端应用程序处理的数据被对端无条件丢弃，对端应用程序可能出现异常
      *
      * 那么调用 close 后，会立该发送一个 RST 标志给对端，该 TCP 连接将跳过四次挥手，也就跳过了 TIME_WAIT 状态，直接关闭。
      * 主动发FIN包方必然会进入TIME_WAIT状态，除非不发送FIN而直接以发送RST结束连接。
@@ -607,6 +615,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
                     //在设置SO_LINGER后，channel会延时关闭，在延时期间我们仍然可以进行读写，这样会导致io线程eventloop不断的循环浪费cpu资源
                     //所以需要在延时关闭期间 将channel注册的事件全部取消。
+                    //https://www.shuzhiduo.com/A/E35pwLL8Jv/
 
                     // We need to remove all registered events for a Channel from the EventLoop
                     // before doing the actual close to ensure we not produce a cpu spin
@@ -620,7 +629,11 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     /**
                      * 该executor用于执行channel关闭的任务。
                      * 注意channel关闭的任务不能在reactor中执行，因为reactor负责多个channel的IO事件的处理，不能因为执行close任务
-                     * 耽误其他channel上的IO事件处理
+                     * 耽误其他channel上的IO事件处理,因为这里用户设置了SO_LINGER,关闭操作会逗留，不能影响Reactor执行其他channel上的
+                     * IO事件
+                     *
+                     * 设置了SO_LINGER,不管是阻塞socket还是非阻塞socket，在关闭的时候都会发生阻塞，所以这里不能使用Reactor线程来
+                     * 执行关闭任务，否则Reactor线程就会被阻塞。
                      * */
                     return GlobalEventExecutor.INSTANCE;
                 }
@@ -629,6 +642,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                 // getSoLinger() may produce an exception. In this case we just return null.
                 // See https://github.com/netty/netty/issues/4449
             }
+            //在没有设置SO_LINGER的情况下，可以使用Reactor线程来执行关闭任务
             return null;
         }
     }

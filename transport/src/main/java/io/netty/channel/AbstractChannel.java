@@ -685,6 +685,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
          *  注意半关闭shutdownOutput不会将channel从reactor上deRegister，也就是说不会清理selectionKey，close方法会清理
          *  所以需要定时清理selectionKeySet中的失效selectKey（半关闭引起）
          *
+         *  注意shutdownOutput不会通知closeFuture
+         *
          *  @see NioEventLoop#cancel(java.nio.channels.SelectionKey)
          *  @see io.netty.channel.nio.NioEventLoop#processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
          */
@@ -703,6 +705,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             final Throwable shutdownCause = cause == null ?
                     new ChannelOutputShutdownException("Channel output shutdown") :
                     new ChannelOutputShutdownException("Channel output shutdown", cause);
+            //The shutdown function does not block regardless of the SO_LINGER setting on the socket.
+            //here is a bug
             Executor closeExecutor = prepareToClose();
             if (closeExecutor != null) {
                 closeExecutor.execute(new Runnable() {
@@ -710,6 +714,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     public void run() {
                         try {
                             // Execute the shutdown.
+                            // 将jdk nio 底层的Socket shutdown
                             doShutdownOutput();
                             promise.setSuccess();
                         } catch (Throwable err) {
@@ -719,6 +724,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                             eventLoop().execute(new Runnable() {
                                 @Override
                                 public void run() {
+                                    //清理ChannelOutboundBuffer，并触发ChannelOutputShutdownEvent事件
                                     closeOutboundBufferForShutdown(pipeline, outboundBuffer, shutdownCause);
                                 }
                             });
@@ -854,6 +860,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 //关闭channel，此时服务端向客户端发送fin2，服务端进入last_ack状态，客户端收到fin2进入time_wait状态
                 doClose();
                 //设置clostFuture的状态为success，表示channel已经关闭
+                //调用shutdownOutput则不会通知closeFuture
                 closeFuture.setClosed();
                 //通知用户promise success,关闭操作已经完成
                 safeSetSuccess(promise);
@@ -866,10 +873,6 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                  *   则调用close或者shutdown不会立即返回，而是需要等待socket对应的发送缓冲区的数据发送完毕并收到对应的ack
                  *   或者逗留时间超时，关闭方法才会返回。
                  *
-                 *   如果socket设置的是非阻塞，那么close或者shutdown方法不会阻塞，而是通过返回值判断、
-                 *   那么此时如果so_linger > 0 且socket发送缓冲区还有数据未发送时且linger超时时间未到，close將會返回一個EWOULDBLOCK的error
-                 *   需要不断尝试调用close方法并判断其返回值
-                 *   https://blog.csdn.net/songchuwang1868/article/details/90369445
                  * */
                 closeFuture.setClosed();
                 safeSetFailure(promise, t);

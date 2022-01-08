@@ -669,11 +669,13 @@ public final class NioEventLoop extends SingleThreadEventLoop {
      * 将socketChannel从selector中移除 取消监听IO事件
      * */
     void cancel(SelectionKey key) {
+        //此时Selector并不会将SelectionKey清除掉，而是加入selector's cancelled-key set
+        //需要等到Selector下次轮询的时候，才会将取消的SelectionKey 从all of the selector's key sets（selectedKeys，keys）中清除掉
         key.cancel();
         cancelledKeys ++;
         //当从selector中移除的socketChannel数量达到256个，设置needsToSelectAgain为true
         // 在io.netty.channel.nio.NioEventLoop.processSelectedKeysPlain 中重新做一次轮询，将失效的selectKey移除，
-        // 以保证selectKeySet的有效性
+        // 以保证selectedKeys的有效性
         // 因为调用shutdownOutput半关闭channel的时候不会清理selectionkey，虽然已经失效了但是不会从selectKeySet中移除
         if (cancelledKeys >= CLEANUP_INTERVAL) {
             cancelledKeys = 0;
@@ -693,8 +695,8 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         for (;;) {
             final SelectionKey k = i.next();
             final Object a = k.attachment();
-            //注意每次迭代末尾的keyIterator.remove()调用。Selector不会自己从已选择键集中移除SelectionKey实例。
-            //必须在处理完通道时自己移除。下次该通道变成就绪时，Selector会再次将其放入已选择键集中。
+            //注意每次迭代末尾的keyIterator.remove()调用。Selector不会自己从就绪集合selectedKeys中移除SelectionKey实例。
+            //必须在处理Channel上的IO活跃事件时自己移除。下次该通道变成就绪时，Selector会再次将其放入就绪集合selectedKeys中。否则一直会通知
 
             // 这里主动清除selectedKey的目的是当Channel关闭时，可以使这些selectedKey被GC掉
             i.remove();
@@ -733,7 +735,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             final SelectionKey k = selectedKeys.keys[i];
             // null out entry in the array to allow to have it GC'ed once the Channel close
             // See https://github.com/netty/netty/issues/2363
-            // 对应迭代器中得remove   Selector不会自己从已选择键集中移除SelectionKey实例。
+            // 对应迭代器中得remove   Selector不会自己从已选择键集中移除SelectionKey实例。需要自己手动从selectedKeys中移除，否则就会一直通知
             // 这里主动清除selectedKey的目的是当Channel关闭时，可以使这些selectedKey被GC掉
             selectedKeys.keys[i] = null;
 

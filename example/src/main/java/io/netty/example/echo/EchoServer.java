@@ -63,6 +63,7 @@ public final class EchoServer {
              .handler(new LoggingHandler(LogLevel.INFO))//设置主Reactor中Channel->pipline->handler
              .childOption(ChannelOption.WRITE_SPIN_COUNT,5)
              .childOption(ChannelOption.SINGLE_EVENTEXECUTOR_PER_GROUP,true)
+             .childOption(ChannelOption.ALLOW_HALF_CLOSURE,true)
              .childHandler(new ChannelInitializer<SocketChannel>() {//设置从Reactor中注册channel的pipeline
                  @Override
                  public void initChannel(SocketChannel ch) throws Exception {
