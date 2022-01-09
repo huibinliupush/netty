@@ -695,18 +695,21 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //如果Channel已经close了，直接返回
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             if (outboundBuffer == null) {
                 promise.setFailure(new ClosedChannelException());
                 return;
             }
+
+            //半关闭状态下，不允许继续写入数据到Socket
             this.outboundBuffer = null; // Disallow adding any messages and flushes to outboundBuffer.
 
             final Throwable shutdownCause = cause == null ?
                     new ChannelOutputShutdownException("Channel output shutdown") :
                     new ChannelOutputShutdownException("Channel output shutdown", cause);
             //The shutdown function does not block regardless of the SO_LINGER setting on the socket.
-            //here is a bug
+            //注意这里有bug
             Executor closeExecutor = prepareToClose();
             if (closeExecutor != null) {
                 closeExecutor.execute(new Runnable() {

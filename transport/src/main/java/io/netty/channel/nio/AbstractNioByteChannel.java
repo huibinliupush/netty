@@ -55,6 +55,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
         }
     };
     //表示Input已经shutdown了，再次对channel进行读取返回-1  设置该标志
+    //表示此时Channel的读通道已经关闭了，不能再继续响应`OP_READ事件`，
     private boolean inputClosedSeenErrorOnRead;
 
     /**
@@ -153,14 +154,15 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                  *
                  * 这里和服务端收到fin一样，也是触发read事件，对channel读取会返回-1
                  *
-                 * 这里的逻辑是当channel的input关闭后，如果还在接收数据，虽然数据会被丢弃，但是reactor还是会触发read事件，从而走到这里
+                 * 在连接半关闭的情况下，JDK NIO Selector会不停的通知OP_READ事件活跃直到调用close完全关闭连接,不过JDK这样处理也是合理的
+                 * 毕竟半关闭状态连接并没有完全关闭，只要连接没有完全关闭，就不停的通知你，直到关闭连接为止。
                  *
                  * 设置inputClosedSeenErrorOnRead = true 如果下次在接收到数据 就将read事件从reactor上取消掉，停止读取
                  * 触发ChannelInputShutdownReadComplete 表示后续不会在进行读取了 保证只会被触发一次
                  *
                  * */
-                //在连接半关闭的情况下，JDK NIO Selector会不停的通知OP_READ事件活跃，不停的执行read方法
-                //到这里，Selector已经是第二次通知OP_READ事件活跃
+                //表示此时Channel的读通道已经关闭了，不能再继续响应`OP_READ事件`，
+                //因为半关闭状态下，Selector会不停的通知`OP_READ事件`，如果不停无脑响应的话，会造成极大的CPU资源的浪费。
                 inputClosedSeenErrorOnRead = true;
                 // 在连接半关闭的情况下，JDK NIO Selector会不停的通知OP_READ事件活跃，
                 // 当用户处理完ChannelInputShutdownEvent事件后，马上会来到这里。
@@ -203,8 +205,6 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                  * No more read spin loop in NIO when the channel is half closed.
                  * https://www.excentis.com/blog/tcp-half-close-cool-feature-now-broken
                  *
-                 * 关闭channel的input后，注意不能读的意思内核不能再往内核缓冲区中增加新的内容。已经在内核缓冲区中的内容，用户态依然能够读取到。
-                 * 后续再收到新的数据，会对数据进行 ACK，然后悄悄地丢弃。
                  *
                  * 这里和服务端收到fin一样，也是触发read事件，对channel读取会返回-1
                  *
