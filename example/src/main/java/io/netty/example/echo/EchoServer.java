@@ -32,6 +32,8 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.util.Recycler.Handle;
 
+import java.lang.management.ManagementFactory;
+
 /**
  * Echoes back any received data from a client.
  */
@@ -78,6 +80,11 @@ public final class EchoServer {
 
             // Start the server. 绑定端口启动服务，开始监听accept事件
             ChannelFuture f = b.bind(PORT).sync();
+
+            String name = ManagementFactory.getRuntimeMXBean().getName();
+            System.out.println(name);
+            String pid = name.split("@")[0];
+            System.out.println("Pid is:" + pid);
 
             // Wait until the server socket is closed.
             f.channel().closeFuture().sync();

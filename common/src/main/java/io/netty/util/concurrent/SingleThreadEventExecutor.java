@@ -58,8 +58,11 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     //定义Reactor线程状态
     private static final int ST_NOT_STARTED = 1;
     private static final int ST_STARTED = 2;
+    //准备正在进行优雅关闭，此时用户仍然可以提交任务，Reactor仍可以执行任务
     private static final int ST_SHUTTING_DOWN = 3;
+    //已经关闭状态，优雅关闭结束，此时用户不能在提交任务，Reactor最后一次执行剩余的任务
     private static final int ST_SHUTDOWN = 4;
+    //Reactor中的任务已被全部执行完毕，且不在接受新的任务，真正的终止状态
     private static final int ST_TERMINATED = 5;
 
     private static final Runnable NOOP_TASK = new Runnable() {
@@ -86,9 +89,11 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     private volatile boolean interrupted;
 
     private final CountDownLatch threadLock = new CountDownLatch(1);
+    //可以向Reactor添加shutdownHook，当Reactor关闭的时候会被调用
     private final Set<Runnable> shutdownHooks = new LinkedHashSet<Runnable>();
 
     //if and only if invocation of #addTask(Runnable) will wake up the executor thread
+    //@see io.netty.util.concurrent.SingleThreadEventExecutor.execute(java.lang.Runnable, boolean)
     //初始化为false
     private final boolean addTaskWakesUp;
 
@@ -101,8 +106,14 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     //Reactor线程状态  初始为 未启动状态
     private volatile int state = ST_NOT_STARTED;
 
+    //在优雅关闭的时候给用户留有一个时间窗口，在这个时间窗口内用户还是可以继续向Reactor提交任务，并且Reactor也会保证将任务执行完毕
+    //在静默期内如果用户不在提交任务或者静默期结束，那么就可以对Reactor进行关闭
+    //所以优雅关闭的时间至少需要等待一个gracefulShutdownQuietPeriod的事件，保证关闭行为的优雅
     private volatile long gracefulShutdownQuietPeriod;
+    //在对Reactor进行优雅关闭的时候，需要执行Reactor中剩余的任务，但是执行这些任务的时间不能超过gracefulShutdownTimeout
+    //保证优雅关闭行为的可控
     private volatile long gracefulShutdownTimeout;
+    //优雅关闭开始时间 相对时间（Reactor开始执行异步任务的时间）
     private long gracefulShutdownStartTime;
 
     private final Promise<?> terminationFuture = new DefaultPromise<Void>(GlobalEventExecutor.INSTANCE);
@@ -656,6 +667,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
         ObjectUtil.checkNotNull(unit, "unit");
 
+        //此时Reactor的状态为ST_STARTED
         if (isShuttingDown()) {
             return terminationFuture();
         }
@@ -679,6 +691,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                         newState = ST_SHUTTING_DOWN;
                         break;
                     default:
+                        //Reactor正在关闭或者已经关闭
                         newState = oldState;
                         wakeup = false;
                 }
@@ -687,13 +700,19 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 break;
             }
         }
+        //优雅关闭静默期，在该时间内，用户还是可以向Reactor提交任务并且执行，只要有任务在Reactor中，就不能进行关闭
+        //每隔100ms检测是否有任务提交进来，如果在静默期内没有新的任务提交，那么才会进行关闭 保证关闭行为的优雅
         gracefulShutdownQuietPeriod = unit.toNanos(quietPeriod);
+        //优雅关闭的最大超时时间，优雅关闭行为不能超过该时间，如果超过的话 不管当前是否还有任务 都要进行关闭
+        //保证关闭行为的可控
         gracefulShutdownTimeout = unit.toNanos(timeout);
 
+        //这里需要保证Reactor线程是在运行状态，如果已经停止，那么就不在进行后续关闭行为，直接返回terminationFuture
         if (ensureThreadStarted(oldState)) {
             return terminationFuture;
         }
 
+        //将正在监听IO事件的Reactor从Selector上唤醒，表示要关闭了，开始执行关闭流程
         if (wakeup) {
             taskQueue.offer(WAKEUP_TASK);
             if (!addTaskWakesUp) {
@@ -774,6 +793,9 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     /**
      * Confirm that the shutdown if the instance should be done now!
+     *
+     * 只要Reactor中还有任务在，就不能关闭，需要一直执行剩余的任务
+     * 返回true表示可以对Reactor进行关闭了，false表示还不能对Reactor进行关闭（只要有任务执行就不能关闭）
      */
     protected boolean confirmShutdown() {
         if (!isShuttingDown()) {
@@ -784,12 +806,15 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             throw new IllegalStateException("must be invoked from an event loop");
         }
 
+        //取消掉所有的定时任务
         cancelScheduledTasks();
 
         if (gracefulShutdownStartTime == 0) {
+            //获取优雅关闭开始时间，相对时间
             gracefulShutdownStartTime = ScheduledFutureTask.nanoTime();
         }
 
+        //这里判断只要有task任务需要执行就不能关闭
         if (runAllTasks() || runShutdownHooks()) {
             if (isShutdown()) {
                 // Executor shut down - no new tasks anymore.
@@ -799,24 +824,40 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             // There were tasks in the queue. Wait a little bit more until no tasks are queued for the quiet period or
             // terminate if the quiet period is 0.
             // See https://github.com/netty/netty/issues/4241
+
+            /**
+             * gracefulShutdownQuietPeriod表示在这段时间内，用户还是可以继续提交异步任务的，Reactor在这段时间内
+             * 是会保证这些任务被执行到的。
+             *
+             * gracefulShutdownQuietPeriod = 0 表示 没有这段静默时期，当前Reactor中的任务执行完毕后，无需等待静默期，执行关闭
+             * */
             if (gracefulShutdownQuietPeriod == 0) {
                 return true;
             }
+            //避免Reactor在Selector上阻塞，因为此时已经不会再去处理IO事件了，专心处理关闭流程
             taskQueue.offer(WAKEUP_TASK);
             return false;
         }
 
+        //此时Reactor中已经没有任务可执行了，是时候考虑关闭的事情了
         final long nanoTime = ScheduledFutureTask.nanoTime();
 
+        //当Reactor中所有的任务执行完毕后，判断是否超过gracefulShutdownTimeout
+        //如果超过了 则直接关闭
         if (isShutdown() || nanoTime - gracefulShutdownStartTime > gracefulShutdownTimeout) {
             return true;
         }
 
+        //即使现在没有任务也还是不能进行关闭，需要等待一个静默期，在静默期内如果没有新的任务提交，才会进行关闭
+        //如果没有超过 则在gracefulShutdownQuietPeriod期间内每隔100ms检测一下用户是否提交了新的任务
+        //也就是说在gracefulShutdownQuietPeriod期间内 用户提交过来的任务还是可以被执行到的
+        //优雅关闭至少要等待gracefulShutdownQuietPeriod时间，在整个静默期间如果都没有任务执行 则关闭
         if (nanoTime - lastExecutionTime <= gracefulShutdownQuietPeriod) {
             // Check if any tasks were added to the queue every 100ms.
             // TODO: Change the behavior of takeTask() so that it returns on timeout.
             taskQueue.offer(WAKEUP_TASK);
             try {
+                //gracefulShutdownQuietPeriod内每隔100ms检测一下 是否有任务需要执行
                 Thread.sleep(100);
             } catch (InterruptedException e) {
                 // Ignore
@@ -825,6 +866,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             return false;
         }
 
+        // 在整个gracefulShutdownQuietPeriod期间内没有任务需要执行或者静默期结束 则无需等待gracefulShutdownTimeout超时，直接关闭
         // No tasks were added for last quiet period - hopefully safe to shut down.
         // (Hopefully because we really cannot make a guarantee that there will be no execute() calls by a user.)
         return true;
@@ -837,6 +879,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             throw new IllegalStateException("cannot await termination of the current thread");
         }
 
+        //等待Reactor关闭 io.netty.util.concurrent.SingleThreadEventExecutor.doStartThread
+        //doStartThread方法在关闭的时候会调用countDown
         threadLock.await(timeout, unit);
 
         return isTerminated();
@@ -861,6 +905,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             //如果当前线程不是Reactor线程，则启动Reactor线程
             //这里可以看出Reactor线程的启动是通过 向NioEventLoop添加异步任务时启动的
             startThread();
+            //当Reactor的状态为ST_SHUTDOWN时，拒绝用户提交的异步任务，但是在优雅关闭ST_SHUTTING_DOWN状态时还是可以接受用户提交的任务的
             if (isShutdown()) {
                 boolean reject = false;
                 try {
@@ -884,7 +929,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
          * addTaskWakesUp = false 表示 并不是只有addTask方法才能唤醒Reactor 还有其他方法可以唤醒Reactor 默认设置 false
          *
          * 比如这里的execute方法，当immediate参数为true的时候表示需要立即执行,addTaskWakesUp 默认设置为false 表示不仅只有addTask可以唤醒Reactor
-         * 还有其他方法可以唤醒
+         * 还有其他方法可以唤醒。但是当设置为true时，语义就变为只有addTask才可以唤醒Reactor,即使这里的immediate = true也不行
          *
          * 这里表达的语义是，有异步任务提交并需要立即执行，必须要唤醒Reactor线程
          * */
@@ -1034,12 +1079,15 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 boolean success = false;
                 updateLastExecutionTime();
                 try {
-                    //Reactor线程开始轮询
+                    //Reactor线程开始轮询处理IO事件，执行异步任务
                     SingleThreadEventExecutor.this.run();
+                    //后面的逻辑为用户调用shutdownGracefully关闭Reactor退出循环 走到这里
                     success = true;
                 } catch (Throwable t) {
                     logger.warn("Unexpected exception from an event executor: ", t);
                 } finally {
+                    //走到这里表示在静默期内已经没有用户在向Reactor提交任务了，或者任务执行超时，开始对Reactor进行关闭
+                    //如果当前Reactor不是关闭状态则将Reactor的状态设置为ST_SHUTTING_DOWN
                     for (;;) {
                         int oldState = state;
                         if (oldState >= ST_SHUTTING_DOWN || STATE_UPDATER.compareAndSet(
@@ -1062,6 +1110,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                         // is in ST_SHUTTING_DOWN state still accepting tasks which is needed for
                         // graceful shutdown with quietPeriod.
                         for (;;) {
+                            //此时Reactor线程虽然已经退出，但是队列还在，而此时Reactor的状态为shuttingdown，任务队列还在
+                            //用户在此时依然可以提交任务，这里是确保用户在最后的这一刻提交的任务可以得到执行。
                             if (confirmShutdown()) {
                                 break;
                             }
@@ -1070,6 +1120,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                         // Now we want to make sure no more tasks can be added from this point. This is
                         // achieved by switching the state. Any new tasks beyond this point will be rejected.
                         for (;;) {
+                            // 当Reactor的状态被更新为SHUTDOWN后，用户提交的任务将会被拒绝
+                            // @see io.netty.util.concurrent.SingleThreadEventExecutor.execute(java.lang.Runnable, boolean)
                             int oldState = state;
                             if (oldState >= ST_SHUTDOWN || STATE_UPDATER.compareAndSet(
                                     SingleThreadEventExecutor.this, oldState, ST_SHUTDOWN)) {
@@ -1079,9 +1131,13 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
                         // We have the final set of tasks in the queue now, no more can be added, run all remaining.
                         // No need to loop here, this is the final pass.
+                        // 这里Reactor的状态已经变为SHUTDOWN了，不会在接受用户提交的新任务了
+                        // 但为了防止用户在状态变为SHUTDOWN之前，也就是Reactor在SHUTTINGDOWN的时候 提交了任务
+                        // 所以此时Reactor中可能还会有任务，需要将剩余的任务执行完毕
                         confirmShutdown();
                     } finally {
                         try {
+                            //SHUTDOWN状态下，在将全部的剩余任务执行完毕后，则将Selector关闭
                             cleanup();
                         } finally {
                             // Lets remove all FastThreadLocals for the Thread as we are about to terminate and notify
@@ -1090,13 +1146,24 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                             // See https://github.com/netty/netty/issues/6596.
                             FastThreadLocal.removeAll();
 
+                            //ST_TERMINATED状态为Reactor真正的终止状态
                             STATE_UPDATER.set(SingleThreadEventExecutor.this, ST_TERMINATED);
+                            //io.netty.util.concurrent.SingleThreadEventExecutor.awaitTermination
+                            //使得awaitTermination方法返回
                             threadLock.countDown();
                             int numUserTasks = drainTasks();
                             if (numUserTasks > 0 && logger.isWarnEnabled()) {
                                 logger.warn("An event executor terminated with " +
                                         "non-empty task queue (" + numUserTasks + ')');
                             }
+
+                            /**
+                             * 通知Reactor的terminationFuture成功，在创建Reactor的时候会向其terminationFuture添加Listener
+                             * 在listener中增加terminatedChildren个数，当所有Reactor关闭后 ReactorGroup关闭成功
+                             *
+                             * @see MultithreadEventExecutorGroup#MultithreadEventExecutorGroup(int, java.util.concurrent.Executor, io.netty.util.concurrent.EventExecutorChooserFactory, java.lang.Object...)
+                             * */
+
                             terminationFuture.setSuccess(null);
                         }
                     }

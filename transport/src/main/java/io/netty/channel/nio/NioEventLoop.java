@@ -584,7 +584,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 // Always handle shutdown even if the loop processing threw an exception.
                 try {
                     if (isShuttingDown()) {
+                        //关闭Reactor上注册的所有Channel,停止处理IO事件，触发unActive以及unRegister事件
                         closeAll();
+                        //注销掉所有Channel停止处理IO事件之后，剩下的就需要执行Reactor中剩余的异步任务了
                         if (confirmShutdown()) {
                             return;
                         }
