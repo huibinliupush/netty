@@ -130,6 +130,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     //    AWAKE            when EL is awake
     //    NONE             when EL is waiting with no wakeup scheduled
     //    other value T    when EL is waiting with wakeup scheduled at time T
+    // 既能表示当前`Reactor线程`的状态，又能表示`Reactor线程`的阻塞超时时间
     private final AtomicLong nextWakeupNanos = new AtomicLong(AWAKE);
 
     //Selector轮询策略 拥有决定什么时候轮询，什么时候处理IO事件，什么时候执行异步任务
@@ -506,7 +507,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         } finally {
                             // This update is just to help block unnecessary selector wakeups
                             // so use of lazySet is ok (no race condition)
-                            // lazySet优化不必要的volatile操作，不使用内存屏障，不保证写操作的可见性
+                            // 为了避免Reactor被不必要的唤醒，因为在向Reactor提交异步任务的时候，也会唤醒Reactor
+                            // @see io.netty.util.concurrent.SingleThreadEventExecutor.execute(java.lang.Runnable, boolean)
+                            // 如果提交异步任务的时候 Reactor是苏醒的状态，那么也就没有必要在去执行Select.wakeup了，省去了系统开销
+                            // lazySet优化不必要的volatile操作，不使用内存屏障，不保证写操作的可见性（单线程执行不需要保证）
                             nextWakeupNanos.lazySet(AWAKE);
                         }
                         // fall through
@@ -903,7 +907,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             return selector.select();
         }
         // Timeout will only be 0 if deadline is within 5 microsecs
-        //通过给定的deadline（绝对时间） 计算 达到deadline所需要的timeout延时（相对时间）
+        // 通过给定的deadline（绝对时间） 计算 达到deadline所需要的timeout延时（相对时间）
         // 如果deadline在5微秒内就即将到达，那么这时计算出的tiemout会是0，所以要 + 995微秒 凑成1毫秒 不能让其为0
         // 因为这里timeou = 0 的语义是 定时任务达到deadline执行时间
         // 所以从这里我们可以看出 只要定时任务没到，至少要阻塞1毫秒

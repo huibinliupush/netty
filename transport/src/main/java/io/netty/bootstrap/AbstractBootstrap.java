@@ -336,23 +336,23 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         Channel channel = null;
         try {
             //创建NioServerSocketChannel
-            //ReflectiveChannelFactory通过泛型，反射，工厂的方式灵活创建不同类型的channel
-            channel = channelFactory.newChannel();
-            //初始化NioServerSocketChannel
-            init(channel);
-        } catch (Throwable t) {
-            if (channel != null) {
-                // channel can be null if newChannel crashed (eg SocketException("too many open files"))
-                channel.unsafe().closeForcibly();
-                // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
-                return new DefaultChannelPromise(channel, GlobalEventExecutor.INSTANCE).setFailure(t);
-            }
+        //ReflectiveChannelFactory通过泛型，反射，工厂的方式灵活创建不同类型的channel
+        channel = channelFactory.newChannel();
+        //初始化NioServerSocketChannel
+        init(channel);
+    } catch (Throwable t) {
+        if (channel != null) {
+            // channel can be null if newChannel crashed (eg SocketException("too many open files"))
+            channel.unsafe().closeForcibly();
             // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
-            return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
+            return new DefaultChannelPromise(channel, GlobalEventExecutor.INSTANCE).setFailure(t);
         }
+        // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
+        return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
+    }
 
-        //向MainReactor注册ServerSocketChannel
-        ChannelFuture regFuture = config().group().register(channel);
+    //向MainReactor注册ServerSocketChannel
+    ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
                 channel.close();

@@ -62,6 +62,7 @@ public final class EchoServer {
             b.group(bossGroup, workerGroup)//配置主从Reactor
              .channel(NioServerSocketChannel.class)//配置主Reactor中的channel类型
              .option(ChannelOption.SO_BACKLOG, 100)//设置主Reactor中channel的属性
+             .option(ChannelOption.MAX_MESSAGES_PER_READ, 16)
              .handler(new LoggingHandler(LogLevel.INFO))//设置主Reactor中Channel->pipline->handler
              .childOption(ChannelOption.WRITE_SPIN_COUNT,5)
              .childOption(ChannelOption.SINGLE_EVENTEXECUTOR_PER_GROUP,true)
