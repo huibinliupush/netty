@@ -22,6 +22,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.nio.NioEventLoop;
 import io.netty.channel.socket.ChannelInputShutdownEvent;
 import io.netty.channel.socket.ChannelInputShutdownReadComplete;
 import io.netty.channel.socket.ChannelOutputShutdownEvent;
@@ -98,6 +99,13 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         SocketChannel sc = (SocketChannel) ctx.channel();
         //半关闭
         sc.shutdownOutput();
+
+        NioEventLoop reactor = (NioEventLoop) ctx.channel().eventLoop();
+        reactor.addShutdownHook(new Runnable() {
+            @Override
+            public void run() {
+            }
+        });
 
     }
 

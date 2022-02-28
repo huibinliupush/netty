@@ -846,10 +846,12 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     }
 
     private void closeAll() {
+        //这里的目的是清理selector中的一些无效key
         selectAgain();
         Set<SelectionKey> keys = selector.keys();
         Collection<AbstractNioChannel> channels = new ArrayList<AbstractNioChannel>(keys.size());
         for (SelectionKey k: keys) {
+            //获取NioSocketChannel
             Object a = k.attachment();
             if (a instanceof AbstractNioChannel) {
                 channels.add((AbstractNioChannel) a);
@@ -862,6 +864,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         for (AbstractNioChannel ch: channels) {
+            //关闭Reactor上注册的所有Channel，并在pipeline中触发unActive事件和unRegister事件
             ch.unsafe().close(ch.unsafe().voidPromise());
         }
     }
