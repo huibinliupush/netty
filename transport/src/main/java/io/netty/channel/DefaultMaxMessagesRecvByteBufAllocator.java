@@ -162,6 +162,8 @@ public abstract class DefaultMaxMessagesRecvByteBufAllocator implements MaxMessa
          *
          * respectMaybeMoreData = false 表示 对可能还有更过数据的这种情况 不认真对待 not respect
          * 不管本次循环读取数据是否满载而归，都要继续进行读取，直到读取不到数据 退出循环
+         *
+         * bug引入PR https://github.com/netty/netty/pull/6322  4.1.9.final
          * */
         @Override
         public boolean continueReading(UncheckedBooleanSupplier maybeMoreDataSupplier) {

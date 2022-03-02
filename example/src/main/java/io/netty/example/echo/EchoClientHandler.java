@@ -57,6 +57,8 @@ public class EchoClientHandler extends ChannelInboundHandlerAdapter {
                // channel.close();
             }
         });
+
+
     }
 
     @Override

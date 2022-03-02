@@ -97,6 +97,7 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
 
         //ctx.channel().unsafe().register();
         SocketChannel sc = (SocketChannel) ctx.channel();
+
         //半关闭
         sc.shutdownOutput();
 
@@ -106,6 +107,10 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
             public void run() {
             }
         });
+
+
+        ctx.close();
+        ctx.channel().close();
 
     }
 
@@ -133,4 +138,6 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
 
         }
     }
+
+
 }
