@@ -226,6 +226,7 @@ abstract class AbstractEpollChannel extends AbstractChannel implements UnixChann
         // We must set the read flag here as it is possible the user didn't read in the last read loop, the
         // executeEpollInReadyRunnable could read nothing, and if the user doesn't explicitly call read they will
         // never get data after this.
+        // @see https://man7.org/linux/man-pages/man2/epoll_ctl.2.html
         setFlag(Native.EPOLLIN);
 
         // If EPOLL ET mode is enabled and auto read was toggled off on the last read loop then we may not be notified

@@ -112,6 +112,8 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         ctx.close();
         ctx.channel().close();
 
+        ctx.alloc().directBuffer();
+
     }
 
     @Override

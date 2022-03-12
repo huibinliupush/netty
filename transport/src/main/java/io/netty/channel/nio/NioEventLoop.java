@@ -131,6 +131,8 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     //    NONE             when EL is waiting with no wakeup scheduled
     //    other value T    when EL is waiting with wakeup scheduled at time T
     // 既能表示当前`Reactor线程`的状态，又能表示`Reactor线程`的阻塞超时时间
+    // nextWakeupNanos == AWAKE表示当前Reactor正在苏醒状态
+    // nextWakeupNanos != AWAKE表示Reactor正处于阻塞状态，值为阻塞时间
     private final AtomicLong nextWakeupNanos = new AtomicLong(AWAKE);
 
     //Selector轮询策略 拥有决定什么时候轮询，什么时候处理IO事件，什么时候执行异步任务
@@ -511,6 +513,8 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                             // @see io.netty.util.concurrent.SingleThreadEventExecutor.execute(java.lang.Runnable, boolean)
                             // 如果提交异步任务的时候 Reactor是苏醒的状态，那么也就没有必要在去执行Select.wakeup了，省去了系统开销
                             // lazySet优化不必要的volatile操作，不使用内存屏障，不保证写操作的可见性（单线程执行不需要保证）
+                            // nextWakeupNanos == AWAKE表示当前Reactor正在苏醒状态
+                            // nextWakeupNanos != AWAKE表示Reactor正处于阻塞状态，值为阻塞时间
                             nextWakeupNanos.lazySet(AWAKE);
                         }
                         // fall through

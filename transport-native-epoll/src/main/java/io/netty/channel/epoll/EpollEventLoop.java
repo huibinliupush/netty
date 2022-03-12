@@ -52,10 +52,25 @@ class EpollEventLoop extends SingleThreadEventLoop {
     }
 
     private final FileDescriptor epollFd;
+    // 在系统给用户空间提供的一种同步机制，用于事件的通知和监听
+    // @see @see https://man7.org/linux/man-pages/man2/eventfd.2.html
+    // @see https://zhuanlan.zhihu.com/p/40572954
+    // https://juejin.cn/post/6989608237226000391
     private final FileDescriptor eventFd;
+    // @see https://man7.org/linux/man-pages/man2/timerfd_create.2.html
+    // https://www.modb.pro/db/100208
     private final FileDescriptor timerFd;
+    //fd --> EpollChannel
     private final IntObjectMap<AbstractEpollChannel> channels = new IntObjectHashMap<AbstractEpollChannel>(4096);
     private final boolean allowGrowing;
+    // The buffer pointed to by events is used to return information from the ready
+    // list about file descriptors in the interest list that have some events available.
+    // @see int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
+    // events 作为events参数传入epoll_wait系统调用中，用来从epoll就绪队列中返回就绪的文件（SocketFd,eventFd timerFd）
+    // 这些就绪的文件信息封装程epoll_event结构缓存在EpollEventArray数组中  epoll_event相当于SelectionKey
+    // 当epoll_wait返回时 就绪的文件会被封装在event_poll结构体中并放入该events数组中返回，epoll_wait返回值为就绪文件的个数
+    // 可以根据就绪文件的个数 在 该events数组中遍历得到具体就绪的文件 @see io.netty.channel.epoll.EpollEventLoop.processReady
+    // 在Reactor关闭的时候会调用io.netty.channel.epoll.EpollEventLoop.cleanup 释放events空间 nio对应的是销毁selector
     private final EpollEventArray events;
 
     // These are initialized on first use
@@ -102,7 +117,9 @@ class EpollEventLoop extends SingleThreadEventLoop {
         FileDescriptor eventFd = null;
         FileDescriptor timerFd = null;
         try {
+            // @see https://man7.org/linux/man-pages/man2/epoll_create.2.html
             this.epollFd = epollFd = Native.newEpollCreate();
+            // @see https://man7.org/linux/man-pages/man2/eventfd.2.html
             this.eventFd = eventFd = Native.newEventFd();
             try {
                 // It is important to use EPOLLET here as we only want to get the notification once per
@@ -111,6 +128,7 @@ class EpollEventLoop extends SingleThreadEventLoop {
             } catch (IOException e) {
                 throw new IllegalStateException("Unable to add eventFd filedescriptor to epoll", e);
             }
+            // @see https://man7.org/linux/man-pages/man2/timerfd_create.2.html
             this.timerFd = timerFd = Native.newTimerFd();
             try {
                 // It is important to use EPOLLET here as we only want to get the notification once per
@@ -201,6 +219,7 @@ class EpollEventLoop extends SingleThreadEventLoop {
 
     /**
      * Register the given epoll with this {@link EventLoop}.
+     * @see https://man7.org/linux/man-pages/man2/epoll_ctl.2.html
      */
     void add(AbstractEpollChannel ch) throws IOException {
         assert inEventLoop();
@@ -215,6 +234,7 @@ class EpollEventLoop extends SingleThreadEventLoop {
 
     /**
      * The flags of the given epoll was modified so update the registration
+     * @see https://man7.org/linux/man-pages/man2/epoll_ctl.2.html
      */
     void modify(AbstractEpollChannel ch) throws IOException {
         assert inEventLoop();
@@ -276,6 +296,7 @@ class EpollEventLoop extends SingleThreadEventLoop {
         return channels.size();
     }
 
+    // @see https://man7.org/linux/man-pages/man2/epoll_wait.2.html
     private int epollWait(long deadlineNanos) throws IOException {
         if (deadlineNanos == NONE) {
             return Native.epollWait(epollFd, events, timerFd, Integer.MAX_VALUE, 0); // disarm timer
@@ -438,17 +459,22 @@ class EpollEventLoop extends SingleThreadEventLoop {
     }
 
     // Returns true if a timerFd event was encountered
+    // @see io.netty.channel.nio.NioEventLoop.processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
     private boolean processReady(EpollEventArray events, int ready) {
         boolean timerFired = false;
         for (int i = 0; i < ready; i ++) {
+            //类似nio中的selectonKey
             final int fd = events.fd(i);
             if (fd == eventFd.intValue()) {
+                //eventFd可读，产生读事件---eventFd计数为0时不可读，当有线程eventFd#write时计数不为0 变为可读 用于事件通知
                 pendingWakeup = false;
             } else if (fd == timerFd.intValue()) {
+                //定时timerFd到期，产生读事件
                 timerFired = true;
             } else {
+                // 类似nio中的readyOps
                 final long ev = events.events(i);
-
+                // selectionKey.attachment()
                 AbstractEpollChannel ch = channels.get(fd);
                 if (ch != null) {
                     // Don't change the ordering of processing EPOLLOUT | EPOLLRDHUP / EPOLLIN if you're not 100%
