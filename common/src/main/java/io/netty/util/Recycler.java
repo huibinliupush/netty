@@ -824,6 +824,7 @@ public abstract class Recycler<T> {
             } else if (threadRef.get() == null) {
                 // when the thread that belonged to the Stack was died or GC'ed，
                 // There is no need to add this item to WeakOrderQueue-linked-list which belonged to the Stack any more
+                // 取消DefaultHander对stack的引用，保证stack可以被Gc
                 item.stack = null;
             } else {
                 // The current Thread is not the one that belongs to the Stack
