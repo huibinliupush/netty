@@ -521,7 +521,10 @@ public abstract class Recycler<T> {
         }
 
         // transfer as many items as we can from this queue to the stack, returning true if any were transferred
-        // 每次转移最多一个Link的容量
+        // 每次转移最多一个Link的容量 这里需要注意的是当head节点被全部转移完毕之后，只是head指针向后移动，转移完毕的
+        // link节点并不会从链表中删除，直接等待垃圾回收即可。我们这里不需要自己删除
+        // link -> link -> link-> link
+        //                 head ： head前边的这些link节点都会被垃圾回收，因为没有引用了。回收第一节点就会回收第二个
         @SuppressWarnings("rawtypes")
         boolean transfer(Stack<?> dst) {
             //获取当前weakOrderQueue节点中的link链表头结点
