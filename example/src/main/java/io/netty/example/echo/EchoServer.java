@@ -81,7 +81,8 @@ public final class EchoServer {
 
             // Start the server. 绑定端口启动服务，开始监听accept事件
             ChannelFuture f = b.bind(PORT).sync();
-
+            NioServerSocketChannel  serverSocketChannel = (NioServerSocketChannel)f.channel();
+            boolean resuse = serverSocketChannel.config().isReuseAddress();
             String name = ManagementFactory.getRuntimeMXBean().getName();
             System.out.println(name);
             String pid = name.split("@")[0];

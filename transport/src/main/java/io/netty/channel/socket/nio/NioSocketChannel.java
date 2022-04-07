@@ -650,7 +650,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     }
 
     private final class NioSocketChannelConfig extends DefaultSocketChannelConfig {
-        //293976 = 146988 << 2
+        //293976 = 146988 << 1
         //SO_SNDBUF设置的发送缓冲区大小 * 2 作为 最大写入字节数
         //最小值为2048  see io.netty.channel.socket.nio.NioSocketChannel.adjustMaxBytesPerGatheringWrite
         private volatile int maxBytesPerGatheringWrite = Integer.MAX_VALUE;

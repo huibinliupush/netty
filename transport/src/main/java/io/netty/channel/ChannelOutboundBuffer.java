@@ -30,7 +30,6 @@ import io.netty.util.internal.PromiseNotificationUtil;
 import io.netty.util.internal.SystemPropertyUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
-import org.openjdk.jol.info.ClassLayout;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
@@ -444,8 +443,9 @@ public final class ChannelOutboundBuffer {
         //当前已经转换了多少个jdk nioBuffer 不能超过maxCount
         int nioBufferCount = 0;
         final InternalThreadLocalMap threadLocalMap = InternalThreadLocalMap.get();
-        //reactor线程缓存的jdk nioBuffer数组，每次发送数据的时候会复用该数组 用于占存待发送数据
+        // reactor线程缓存的jdk nioBuffer数组，每次发送数据的时候会复用该数组 用于占存待发送数据
         // msg中的nioBuffer（Netty实现）在这里会转换为 jdk nioBuffer，随后会存储在该数组中 准备发送
+        // 初始大小 1024
         ByteBuffer[] nioBuffers = NIO_BUFFERS.get(threadLocalMap);
         Entry entry = flushedEntry;
         while (isFlushedEntry(entry) && entry.msg instanceof ByteBuf) {
@@ -854,8 +854,14 @@ public final class ChannelOutboundBuffer {
     }
 
     public static void main(String[] args) {
-        char[] entry = new char[3];
-        System.out.println(ClassLayout.parseInstance(entry).toPrintable());
+        ByteBuffer byteBuffer = ByteBuffer.allocate(4);
+        int orderTest = 5674;
+        byteBuffer.putInt(orderTest);
+
+
+
+        //ArrayTest entry = new ArrayTest();
+        //System.out.println(ClassLayout.parseInstance(entry).toPrintable());
     }
 
     static final class Entry {

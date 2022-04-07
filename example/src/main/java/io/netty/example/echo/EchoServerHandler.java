@@ -87,7 +87,6 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
 
         ctx.deregister();
         ctx.channel().deregister();
-
         ctx.channel().eventLoop().execute(new Runnable() {
             @Override
             public void run() {
