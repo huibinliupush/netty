@@ -854,9 +854,9 @@ public final class ChannelOutboundBuffer {
     }
 
     public static void main(String[] args) {
-        ByteBuffer byteBuffer = ByteBuffer.allocate(4);
-        int orderTest = 5674;
-        byteBuffer.putInt(orderTest);
+        Long a = (long)1 << 47;
+        Long b = (long)4 * 1024;
+        System.out.println( a - b);
 
 
 

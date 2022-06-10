@@ -77,6 +77,7 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
 
 
 
+
         ChannelFuture channelFuture = ctx.channel().close();
         channelFuture.addListener(new ChannelFutureListener() {
             @Override

@@ -771,9 +771,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     private void processSelectedKey(SelectionKey k, AbstractNioChannel ch) {
         final AbstractNioChannel.NioUnsafe unsafe = ch.unsafe();
+        // 处理 key 已经失效 但是 channel仍然在该reactor上注册着的情况
         if (!k.isValid()) {
             final EventLoop eventLoop;
             try {
+                // eventLoop != null 表示channel仍然在该reactor上注册着
                 eventLoop = ch.eventLoop();
             } catch (Throwable ignored) {
                 // If the channel implementation throws an exception because there is no event loop, we ignore this
