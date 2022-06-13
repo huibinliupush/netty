@@ -856,7 +856,11 @@ public final class ChannelOutboundBuffer {
     public static void main(String[] args) {
         Long a = (long)1 << 47;
         Long b = (long)4 * 1024;
-        System.out.println( a - b);
+
+        long c = Long.valueOf("140737488351232") / (1024 * 1024 * 1024 * 1024);
+
+
+        System.out.println(c);
 
 
 
