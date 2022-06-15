@@ -555,7 +555,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     /**
      *
-     *   在默认情况下,当调用close关闭socke的使用,close会立即返回,但是,如果send buffer中还有数据,系统会试着先把send buffer中的数据发送出去
+     *   在默认情况下,当调用close关闭socke的使用,close会立即返回,但是,如果send buffer中还有数据,内核会试着先把send buffer中的数据发送出去
      *   SO_LINGER选项则是用来修改这种默认操作
      *   影响close方法和shutdown方法的返回，l_onoff非零开启so_linger，l_linger逗留时间大于0
      *   则调用close或者shutdown不会立即返回，而是需要等待socket对应的发送缓冲区的数据发送完毕并收到对应的ack
