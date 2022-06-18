@@ -141,6 +141,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     pipeline.fireUserEventTriggered(ChannelInputShutdownEvent.INSTANCE);
                 } else {
                     //如果不支持半关闭，则服务端直接调用close方法向客户端发送fin,结束close_wait状态进如last_ack状态
+                    //半关闭状态下，客户端在 FIN_WAIT2 状态下接收到 服务端 close_wait 状态下发送的 fin 之后还是会来到这里
+                    //关闭连接释放资源
                     close(voidPromise());
                 }
             } else {
