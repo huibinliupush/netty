@@ -39,7 +39,7 @@ public final class EchoClient {
     static final boolean SSL = System.getProperty("ssl") != null;
     static final String HOST = System.getProperty("host", "127.0.0.1");
     static final int PORT = Integer.parseInt(System.getProperty("port", "8007"));
-    static final int SIZE = Integer.parseInt(System.getProperty("size", "2049"));
+    static final int SIZE = Integer.parseInt(System.getProperty("size", "4000"));
 
     public static void main(String[] args) throws Exception {
         // Configure SSL.git
@@ -58,7 +58,7 @@ public final class EchoClient {
             b.group(group)
              .channel(NioSocketChannel.class)
            //  .option(ChannelOption.TCP_NODELAY, true)//开启nagle算法
-             .option(ChannelOption.SO_LINGER, 5)
+           //  .option(ChannelOption.SO_LINGER, 0)
              .handler(new ChannelInitializer<SocketChannel>() {
                  @Override
                  public void initChannel(SocketChannel ch) throws Exception {

@@ -360,7 +360,8 @@ public class ResourceLeakDetector<T> {
         private volatile TraceRecord head;
         @SuppressWarnings("unused")
         private volatile int droppedRecords;
-
+        // 所有存在泄露的 buffer,与其关联的 DefaultResourceLeak 均存放在 allLeaks 链表中
+        // 当 buffer release 之后，如果 netty 发现它的 refCount = 0 ，则将关联的 DefaultResourceLeak 从 allLeaks 中删除
         private final Set<DefaultResourceLeak<?>> allLeaks;
         private final int trackedHash;
 
@@ -465,6 +466,10 @@ public class ResourceLeakDetector<T> {
 
         @Override
         public boolean close(T trackedObject) {
+            // 当手动调用 release 释放 buffer 的时候，如果 buffer 的 refCount 为 0 ，那么 netty 就会调用这里的 close 方法将 DefaultResourceLeak 从 allLeaks 链表中删除
+            // 当 buffer 的 refCount 不为 0 ，就是存在泄露的状态，当 buffer 被 GC 之后，与 buffer 关联的 DefaultResourceLeak 就会被加入到 refQueue 中
+            // reportLeak 会从 refQueue 取出这些 DefaultResourceLeak，如果其仍然在 allLeaks 链表中，则表明 buffer 被 Gc 的时候还处于泄露状态
+            // io.netty.util.ResourceLeakDetector.track0 方法（创建 Buffer 的时候）中触发 reportLeak 报告内存泄露信息
             // Ensure that the object that was tracked is the same as the one that was passed to close(...).
             assert trackedHash == System.identityHashCode(trackedObject);
 
@@ -500,6 +505,8 @@ public class ResourceLeakDetector<T> {
          */
         private static void reachabilityFence0(Object ref) {
             if (ref != null) {
+                // synchronized 块是 gcRoot，保证 ref 的可达性，该方法通常在 finnaly 块中调用
+                // 这样可以保证在 try 块里，ref 对象一直保证活跃不被 GC, 因为 finnaly 块中有对它的强引用（finnaly 中的代码一定是要执行的，在 finnaly 中强引用ref，那么一定不会被 GC）
                 synchronized (ref) {
                     // Empty synchronized is ok: https://stackoverflow.com/a/31933260/1151521
                 }

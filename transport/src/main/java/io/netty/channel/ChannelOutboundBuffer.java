@@ -33,6 +33,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
+import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
@@ -855,15 +856,11 @@ public final class ChannelOutboundBuffer {
 
     public static void main(String[] args) {
         Long a = (long)1 << 47;
-        Long b = (long)4 * 1024;
-
-        long c = Long.valueOf("140737488351232") / (1024 * 1024 * 1024 * 1024);
-
-
-        System.out.println(c);
+        long b = 10 ^ (1 << 3);
+        System.out.println(b);
 
 
-
+        ByteBuffer byteBuffer = Charset.forName("UTF8").encode("利威尔");
         //ArrayTest entry = new ArrayTest();
         //System.out.println(ClassLayout.parseInstance(entry).toPrintable());
     }

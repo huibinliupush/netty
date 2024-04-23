@@ -49,15 +49,8 @@ public class EchoClientHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelActive(final ChannelHandlerContext ctx) {
         System.out.println("client send first message");
-        ctx.writeAndFlush(firstMessage).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) throws Exception {
-                SocketChannel channel = (SocketChannel)future.channel();
-                channel.shutdownOutput();
-               // channel.close();
-            }
-        });
 
+        ctx.writeAndFlush(firstMessage);
 
     }
 
@@ -78,7 +71,13 @@ public class EchoClientHandler extends ChannelInboundHandlerAdapter {
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         // Close the connection when an exception is raised.
         cause.printStackTrace();
-        ctx.close();
+        System.out.println("client exceptionCaught because rst from server");
+
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("client recv rest do reconnect");
     }
 
     @Override

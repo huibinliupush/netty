@@ -165,6 +165,8 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
          * 等待 Channel 注册完成后，调用ChannelInitializer -> initChannel
          * 再向 Pipeline 中添加 ServerBootstrapAcceptor 处理器。
          *
+         * 那么多的 reactor,到底由哪个 reactor 执行 pipeline 的初始化工作？所以需要在 channel 注册之后才能确定 reactor 线程
+         *
          * 此时执行线程已经是Reactor线程为什么不直接添加acceptor 而是封装程异步任务？。
          *
          * 1：当注册完成后触发hanlderAdded回调 执行initChannel时 这时线程为Reactor线程

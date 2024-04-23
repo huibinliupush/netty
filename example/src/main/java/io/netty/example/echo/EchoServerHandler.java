@@ -53,9 +53,9 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
      * */
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) {
-        //此处的msg就是Netty在read loop中从NioSocketChannel中读取到ByteBuffer
 
         System.out.println("server recv client first message");
+     //   ctx.close();
         ChannelFuture future = ctx.write(msg);
         future.addListener(new ChannelFutureListener() {
             @Override
@@ -141,5 +141,9 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        System.out.println("server recv client first message");
+        System.out.println(cause);
+    }
 }

@@ -798,6 +798,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             int readyOps = k.readyOps();
             // We first need to call finishConnect() before try to trigger a read(...) or write(...) as otherwise
             // the NIO JDK channel implementation may throw a NotYetConnectedException.
+            // OP_CONNECT 事件在客户端异步 connect 的时候注册 @see io.netty.channel.socket.nio.NioSocketChannel.doConnect
+            // 客户端和服务端的 nioSocketChannel 是一样的在创建的时候默认关心事件都是 OP_READ
+            // 客户端和服务端流程都是一样的，客户端的 connect 类比 服务端的 bind
+            // 客户端：register -> connect -> channelActive -> beginRead -> 注册op_read
+            // 服务端：register -> bind -> channelActive -> beginRead -> 注册op_read
             if ((readyOps & SelectionKey.OP_CONNECT) != 0) {
                 // remove OP_CONNECT as otherwise Selector.select(..) will always return without blocking
                 // See https://github.com/netty/netty/issues/924
