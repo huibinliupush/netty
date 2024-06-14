@@ -414,6 +414,8 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         eventLoop().cancel(selectionKey());
     }
 
+
+    // channelActive 会掉这里，channelReadComplete 也会掉这里
     @Override
     protected void doBeginRead() throws Exception {
         // Channel.read() or ChannelHandlerContext.read() was called
@@ -421,7 +423,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         if (!selectionKey.isValid()) {
             return;
         }
-
+        // readPending 在每次读取完之后（readComplete 事件之后）就会被重置为 true
         readPending = true;
 
         final int interestOps = selectionKey.interestOps();

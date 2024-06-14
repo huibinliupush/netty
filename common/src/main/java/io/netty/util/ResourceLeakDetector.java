@@ -291,11 +291,14 @@ public class ResourceLeakDetector<T> {
 
         // Detect and report previous leaks.
         for (;;) {
+            // refQueue 中存放的全部是已经被 gc 掉的 bytebuffer
+            // 如果 buffer 还没有被 gc 那么就不会触发这里的 reportLeak
             DefaultResourceLeak ref = (DefaultResourceLeak) refQueue.poll();
             if (ref == null) {
                 break;
             }
-
+            // 如果一个 bytebuffer 被 gc 之后，它的 DefaultResourceLeak 如果还停留在 allLeak 集合中
+            // 那说明我们就没释放 bytebuffer
             if (!ref.dispose()) {
                 continue;
             }
@@ -360,6 +363,16 @@ public class ResourceLeakDetector<T> {
         private volatile TraceRecord head;
         @SuppressWarnings("unused")
         private volatile int droppedRecords;
+
+        // 存放在 allLeaks 中的 DefaultResourceLeak 有如下几种情况
+        // 1. buffer 还没有被回收，那么它的 DefaultResourceLeak 肯定在 allLeank 中
+        // 2. buffer 的引用计数为 0 ，它的 DefaultResourceLeak 就会从 allLeak 中移除
+        // 3. buffer 被回收，如果它的 DefaultResourceLeak 仍然停留在 allLeak 中，说明就泄露了
+        // 也就是说存放的是所有的引用计数不为 0 的 buffer. 1. 正在使用的 buffer 2. 没有 release 确实泄露的 buffer
+
+        // 从 ReferenceQueue 中拿到被回收的 buffer，检查它的 DefaultResourceLeak 是否在 allLeak 中
+        // 如果一个 buffer 还没有被 GC 那么就不会 reportLeak
+
         // 所有存在泄露的 buffer,与其关联的 DefaultResourceLeak 均存放在 allLeaks 链表中
         // 当 buffer release 之后，如果 netty 发现它的 refCount = 0 ，则将关联的 DefaultResourceLeak 从 allLeaks 中删除
         private final Set<DefaultResourceLeak<?>> allLeaks;

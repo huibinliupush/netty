@@ -66,7 +66,9 @@ public class DefaultChannelConfig implements ChannelConfig {
     private volatile int connectTimeoutMillis = DEFAULT_CONNECT_TIMEOUT;
     private volatile int writeSpinCount = 16;
     @SuppressWarnings("FieldMayBeFinal")
+    // 背压机制，如果对端狂发数据，而服务端处理不过来，那么就设置 autoRead = false 停止读取，否则会造成 OOM
     private volatile int autoRead = 1;
+    // 遇到 IOException 是否自动关闭连接
     private volatile boolean autoClose = true;
     //ChannelOutboundBuffer中的高低水位线
     private volatile WriteBufferWaterMark writeBufferWaterMark = WriteBufferWaterMark.DEFAULT;

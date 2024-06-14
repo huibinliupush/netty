@@ -1574,6 +1574,8 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             readIfIsAutoRead();
         }
 
+        // ChannelActive 会调用
+        // ChannelReadComplete 会调用
         private void readIfIsAutoRead() {
             if (channel.config().isAutoRead()) {
                 //如果是autoRead 则触发read事件传播

@@ -319,7 +319,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 /**
                  * autoread提供一种背压机制。防止oom
                  *
-                 * 这里需要注意当设置autoRead = false后，需要将本次接收数据全部接收完毕(readPending = false) 才会removeReadOp
+                 * 这里需要注意当设置autoRead = false后，需要将本次接收到的数据 fireChannelRead 出去(readPending = false) 才会removeReadOp
+                 * readPending 的语义是，仅是本次接收到的数据（通过读取 socket ）是否已经传递给 handler（本次处理完成）,而不是 socket 中的数据是否处理完了
                  *
                  * If you have not set autoread to false you may get into trouble
                  * if one channel writes a lot of data before the other can consume it.
