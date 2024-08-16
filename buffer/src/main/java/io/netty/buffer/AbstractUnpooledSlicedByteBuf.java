@@ -34,6 +34,7 @@ abstract class AbstractUnpooledSlicedByteBuf extends AbstractDerivedByteBuf {
     private final int adjustment;
 
     AbstractUnpooledSlicedByteBuf(ByteBuf buffer, int index, int length) {
+        // 设置视图 ByteBuf 的 maxCapacity
         super(length);
         checkSliceOutOfBounds(index, length, buffer);
 
@@ -49,6 +50,7 @@ abstract class AbstractUnpooledSlicedByteBuf extends AbstractDerivedByteBuf {
         }
 
         initLength(length);
+        // 设置视图 ByteBuf 的 writerIndex
         writerIndex(length);
     }
 

@@ -73,6 +73,8 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
     public UnpooledByteBufAllocator(boolean preferDirect, boolean disableLeakDetector, boolean tryNoCleaner) {
         super(preferDirect);
         this.disableLeakDetector = disableLeakDetector;
+        // Netty 设计 NoCleaner 类型的 DirectByteBuf 的另外一个目的就是为了突破 JVM 对于 maxDirectMemory 用量的限制
+        // 因为 NoCleaner 的 JDK DirectByteBuffer 不会统计到 -XX:MaxDirectMemorySize 中
         noCleaner = tryNoCleaner && PlatformDependent.hasUnsafe()
                 && PlatformDependent.hasDirectBufferNoCleanerConstructor();
     }
@@ -173,7 +175,9 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
             ((UnpooledByteBufAllocator) alloc()).decrementHeap(length);
         }
     }
-
+    // Pooled 类型的 DirectByteBuf 没有 Instrumented，它不会像 Unpooled 的这样每次申请，释放特意的统计
+    // Pooled 会将相关 Metrics 的统计，统一收敛到内存池中，统一进行。
+    // @see io.netty.buffer.PooledByteBufAllocatorMetric
     private static final class InstrumentedUnpooledUnsafeNoCleanerDirectByteBuf
             extends UnpooledUnsafeNoCleanerDirectByteBuf {
         InstrumentedUnpooledUnsafeNoCleanerDirectByteBuf(
@@ -225,6 +229,7 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
         }
     }
 
+    // Instrumented 前缀表示在每次申请内存或者释放内存之后都会更新 ByteBufAllocatorMetric 的统计 metrics
     private static final class InstrumentedUnpooledDirectByteBuf extends UnpooledDirectByteBuf {
         InstrumentedUnpooledDirectByteBuf(
                 UnpooledByteBufAllocator alloc, int initialCapacity, int maxCapacity) {

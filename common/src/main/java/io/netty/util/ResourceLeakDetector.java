@@ -434,10 +434,12 @@ public class ResourceLeakDetector<T> {
          */
         private void record0(Object hint) {
             // Check TARGET_RECORDS > 0 here to avoid similar check before remove from and add to lastRecords
+            // 最大允许保存的 TARGET_RECORDS 个数
             if (TARGET_RECORDS > 0) {
                 TraceRecord oldHead;
                 TraceRecord prevHead;
                 TraceRecord newHead;
+                // TraceRecord 的个数如果超过了 TARGET_RECORDS。就需要将最新的头结点记录 drop 掉
                 boolean dropped;
                 do {
                     if ((prevHead = oldHead = headUpdater.get(this)) == null) {
@@ -448,11 +450,14 @@ public class ResourceLeakDetector<T> {
                     if (numElements >= TARGET_RECORDS) {
                         final int backOffFactor = Math.min(numElements - TARGET_RECORDS, 30);
                         if (dropped = PlatformDependent.threadLocalRandom().nextInt(1 << backOffFactor) != 0) {
+                            // drop 掉最新的 TraceRecord
                             prevHead = oldHead.next;
                         }
                     } else {
                         dropped = false;
                     }
+                    // 将位于头结点 head 最新的 TraceRecord 丢掉，用新的 newHead 替换
+                    // newHead 变为新的 head ，其 next 指向原来的第二个 TraceRecord（prevHead = oldHead.next）
                     newHead = hint != null ? new TraceRecord(prevHead, hint) : new TraceRecord(prevHead);
                 } while (!headUpdater.compareAndSet(this, oldHead, newHead));
                 if (dropped) {

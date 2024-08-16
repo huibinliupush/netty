@@ -54,10 +54,12 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     static {
         if (SystemPropertyUtil.contains(PROP_CHECK_ACCESSIBLE)) {
+            // 检查 ByteBuf 的引用计数是否为 0 ，为 0 表示已经被释放，那么就不能再次访问该 ByteBuf
             checkAccessible = SystemPropertyUtil.getBoolean(PROP_CHECK_ACCESSIBLE, true);
         } else {
             checkAccessible = SystemPropertyUtil.getBoolean(LEGACY_PROP_CHECK_ACCESSIBLE, true);
         }
+        // 检查 ByteBuf 中各种 index 的边界条件
         checkBounds = SystemPropertyUtil.getBoolean(PROP_CHECK_BOUNDS, true);
         if (logger.isDebugEnabled()) {
             logger.debug("-D{}: {}", PROP_CHECK_ACCESSIBLE, checkAccessible);
@@ -214,17 +216,25 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     @Override
     public ByteBuf discardReadBytes() {
+        // readerIndex 为 0 表示没有可以丢弃的字节
         if (readerIndex == 0) {
             ensureAccessible();
             return this;
         }
 
         if (readerIndex != writerIndex) {
+            // 将 [readerIndex, writerIndex] 这段字节范围移动到 ByteBuf 的开头
+            // 也就是丢弃 readerIndex 之前的字节
             setBytes(0, this, readerIndex, writerIndex - readerIndex);
+            // writerIndex 和 readerIndex 都向前移动 readerIndex 大小
             writerIndex -= readerIndex;
+            // 重新调整 markedReaderIndex 和 markedWriterIndex 的位置
             adjustMarkers(readerIndex);
             readerIndex = 0;
         } else {
+            // readerIndex = writerIndex 表示当前 ByteBuf 已经不可读了
+            // 将 readerIndex 之前的字节全部丢弃，ByteBuf 恢复到最初的状态
+            // 整个 ByteBuf 的容量都可以被写入
             ensureAccessible();
             adjustMarkers(readerIndex);
             writerIndex = readerIndex = 0;
@@ -235,13 +245,14 @@ public abstract class AbstractByteBuf extends ByteBuf {
     @Override
     public ByteBuf discardSomeReadBytes() {
         if (readerIndex > 0) {
+            // 当 ByteBuf 已经不可读了，则无条件丢弃已读字节
             if (readerIndex == writerIndex) {
                 ensureAccessible();
                 adjustMarkers(readerIndex);
                 writerIndex = readerIndex = 0;
                 return this;
             }
-
+            // 当已读的字节数超过整个 ByteBuf 的一半容量时才会丢弃已读字节
             if (readerIndex >= capacity() >>> 1) {
                 setBytes(0, this, readerIndex, writerIndex - readerIndex);
                 writerIndex -= readerIndex;
@@ -256,21 +267,28 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     protected final void adjustMarkers(int decrement) {
         int markedReaderIndex = this.markedReaderIndex;
+        // 如果 markedReaderIndex <= readerIndex
         if (markedReaderIndex <= decrement) {
+            // 此时 readerIndex 向前移动了 readerIndex 大小，那么直接将 markedReaderIndex 设置为 0 即可
+            // markedReaderIndex 对应的字节已经被丢弃了
             this.markedReaderIndex = 0;
             int markedWriterIndex = this.markedWriterIndex;
             if (markedWriterIndex <= decrement) {
+                // markedWriterIndex 对应的字节已经被丢弃了。直接设置为 0
                 this.markedWriterIndex = 0;
             } else {
+                // WriterIndex 向前移动了 readerIndex 大小，那么对应的 markedWriterIndex 也应该向前移动 readerIndex 大小
                 this.markedWriterIndex = markedWriterIndex - decrement;
             }
         } else {
+            // 在丢弃字节的时候， ByteBuf 中的 readerIndex 和 writerIndex 都会向前移动 readerIndex（可丢弃字节数） 大小
+            // 那么与之对应的 markedReaderIndex，markedWriterIndex 也都应该向前移动 readerIndex（decrement）大小
             this.markedReaderIndex = markedReaderIndex - decrement;
             markedWriterIndex -= decrement;
         }
     }
 
-    // Called after a capacity reduction
+    // Called after a capacity reduction（缩容）
     protected final void trimIndicesToCapacity(int newCapacity) {
         if (writerIndex() > newCapacity) {
             setIndex0(Math.min(readerIndex(), newCapacity), newCapacity);
@@ -285,12 +303,15 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     final void ensureWritable0(int minWritableBytes) {
         final int writerIndex = writerIndex();
+        // 为满足本次的写入操作，预期的 ByteBuf 容量大小
         final int targetCapacity = writerIndex + minWritableBytes;
+        // 如果 targetCapacity 在（capacity , maxCapacity] 之间，则进行扩容
         // using non-short-circuit & to reduce branching - this is a hot path and targetCapacity should rarely overflow
         if (targetCapacity >= 0 & targetCapacity <= capacity()) {
             ensureAccessible();
             return;
         }
+        // 扩容后的容量不能超过 maxCapacity
         if (checkBounds && (targetCapacity < 0 || targetCapacity > maxCapacity)) {
             ensureAccessible();
             throw new IndexOutOfBoundsException(String.format(
@@ -299,7 +320,9 @@ public abstract class AbstractByteBuf extends ByteBuf {
         }
 
         // Normalize the target capacity to the power of 2.
+        // writableBytes 在不进行扩容的情况下，可写的字节数（PooledByteBuf 除外，另外实现）
         final int fastWritable = maxFastWritableBytes();
+        // 计算扩容后的容量 newCapacity
         int newCapacity = fastWritable >= minWritableBytes ? writerIndex + fastWritable
                 : alloc().calculateNewCapacity(targetCapacity, maxCapacity);
 
@@ -307,26 +330,34 @@ public abstract class AbstractByteBuf extends ByteBuf {
         capacity(newCapacity);
     }
 
+    // 返回 0 表示不需要扩容，当前容量可以满足本次写入要求
+    // 返回 1 表示 minWritableBytes 已经超过了最大可写容量，停止扩容
+    // 返回 3 表示在超过最大可写容量的情况下，强制扩容至 maxCapacity
+    // 返回 2 表示走的是正常扩容逻辑
+    // 返回值 0 和 2 均表示当前 ByteBuf 拥有足够容量满足本次写入操作
     @Override
     public int ensureWritable(int minWritableBytes, boolean force) {
         ensureAccessible();
         checkPositiveOrZero(minWritableBytes, "minWritableBytes");
-
+        // 如果剩余容量可以满足本次写入操作，则不会扩容，直接返回
         if (minWritableBytes <= writableBytes()) {
             return 0;
         }
 
         final int maxCapacity = maxCapacity();
         final int writerIndex = writerIndex();
+        // 如果本次写入的数据大小已经超过了 ByteBuf 的最大可写容量 maxCapacity - writerIndex
         if (minWritableBytes > maxCapacity - writerIndex) {
+            // force = false ， 那么停止扩容，直接返回
+            // force = true, 直接扩容到 maxCapacity，如果当前 capacity 已经等于 maxCapacity 了则停止扩容
             if (!force || capacity() == maxCapacity) {
                 return 1;
             }
-
+            // 虽然扩容之后还是无法满足写入需求，但还是强制扩容至 maxCapacity
             capacity(maxCapacity);
             return 3;
         }
-
+        // 下面就是普通的扩容逻辑
         int fastWritable = maxFastWritableBytes();
         int newCapacity = fastWritable >= minWritableBytes ? writerIndex + fastWritable
                 : alloc().calculateNewCapacity(writerIndex + minWritableBytes, maxCapacity);
@@ -365,8 +396,18 @@ public abstract class AbstractByteBuf extends ByteBuf {
         return getByte(index) != 0;
     }
 
+    // An UnsignedByte is like a Byte, but its values range from 0 to 255 instead of -128 to 127.
+    // Most languages have a native unsigned-byte type (e.g., C, C++, C#), but Java doesn't.
+    // @see https://www.cs.ubc.ca/~tmm/courses/213-12/resources/sm-doc/util/UnsignedByte.html
     @Override
     public short getUnsignedByte(int index) {
+        // Java does not allow to express 244 as a byte value, as would C.
+        // To express positive integers above Byte.MAX_VALUE (127) you have to use a different integral type,
+        // like short, int or long.
+        // 由于 Java 本身不支持 Unsigned 类型，Byte 为 8 位，其实能够表示的数字范围为：0 到 255
+        // 但由于不支持 Unsigned，所以 Java 的 Byte 类型只能表示 -128 to 127，正数的话只能表示 0 到 127，
+        // 但原本 UnsignedByte 可以表示的是 0 到 255，是 Java Byte 类型能够表示的数字范围的两倍
+        // 所以将 Java Byte 类型转换为 UnsignedByte 的时候需要用 Short 类型来表示，因为 Java Byte 类型无法表示 0 到 255 这个数字范围
         return (short) (getByte(index) & 0xFF);
     }
 

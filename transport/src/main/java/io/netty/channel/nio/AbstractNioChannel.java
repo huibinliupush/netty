@@ -467,6 +467,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             return directBuf;
         }
 
+        // 默认 256 ，大小会根据 buf 调整
         final ByteBuf directBuf = ByteBufUtil.threadLocalDirectBuffer();
         if (directBuf != null) {
             directBuf.writeBytes(buf, buf.readerIndex(), readableBytes);

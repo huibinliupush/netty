@@ -108,6 +108,7 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
      * Free a direct {@link ByteBuffer}
      */
     protected void freeDirect(ByteBuffer buffer) {
+        // 调用 JDK DirectByteBuffer 的 Cleaner 释放 Native Memory
         PlatformDependent.freeDirectBuffer(buffer);
     }
 
@@ -140,6 +141,7 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
 
     @Override
     public ByteBuf capacity(int newCapacity) {
+        // newCapacity 不能超过 maxCapacity
         checkNewCapacity(newCapacity);
         int oldCapacity = capacity;
         if (newCapacity == oldCapacity) {
@@ -149,6 +151,8 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
         if (newCapacity > oldCapacity) {
             bytesToCopy = oldCapacity;
         } else {
+            // newCapacity < oldCapacity（缩容）
+            // 调整缩容后的 ByteBuf 中的 readIndex 和 writeIndex
             trimIndicesToCapacity(newCapacity);
             bytesToCopy = newCapacity;
         }
@@ -157,6 +161,8 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
         oldBuffer.position(0).limit(bytesToCopy);
         newBuffer.position(0).limit(bytesToCopy);
         newBuffer.put(oldBuffer).clear();
+        // 释放 oldBuffer，设置 newBuffer
+        // 对于 UnpooledUnsafeDirectByteBuf 来说就是将 newBuffer 的地址设置到 memoryAddress 中
         setByteBuffer(newBuffer, true);
         return this;
     }
@@ -605,11 +611,13 @@ public class UnpooledDirectByteBuf extends AbstractReferenceCountedByteBuf {
         ensureAccessible();
         ByteBuffer src;
         try {
+            // 将原生 ByteBuf 中 [index , index + lengh) 这段范围的数据拷贝到新的 ByteBuf 中
             src = (ByteBuffer) buffer.duplicate().clear().position(index).limit(index + length);
         } catch (IllegalArgumentException ignored) {
             throw new IndexOutOfBoundsException("Too many bytes to read - Need " + (index + length));
         }
-
+        // 首先新申请一段 native memory , 新的 ByteBuf 初始容量为 length (真实容量)，最大容量与原生 ByteBuf 的 maxCapacity 相等
+        // readerIndex = 0 , writerIndex = length
         return alloc().directBuffer(length, maxCapacity()).writeBytes(src);
     }
 

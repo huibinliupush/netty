@@ -15,6 +15,7 @@
  */
 package io.netty.util;
 
+
 /**
  * A reference-counted object that requires explicit deallocation.
  * <p>
@@ -49,6 +50,11 @@ public interface ReferenceCounted {
      * Records the current access location of this object for debugging purposes.
      * If this object is determined to be leaked, the information recorded by this operation will be provided to you
      * via {@link ResourceLeakDetector}.  This method is a shortcut to {@link #touch(Object) touch(null)}.
+     *
+     * io.netty.util.ResourceLeakDetector.DefaultResourceLeak#record0(java.lang.Object)
+     * 记录当前 ByteBuf 的访问堆栈 —— TraceRecord，存放在 io.netty.util.ResourceLeakDetector.DefaultResourceLeak#head 栈中
+     * 当报告内存泄露信息的时候，会将 DefaultResourceLeak#head 中保存的访问堆栈信息打印出来，清晰的展示内存泄露的位置
+     * 一个 ByteBuf 对应一个 DefaultResourceLeak（弱引用）
      */
     ReferenceCounted touch();
 
@@ -56,6 +62,8 @@ public interface ReferenceCounted {
      * Records the current access location of this object with an additional arbitrary information for debugging
      * purposes.  If this object is determined to be leaked, the information recorded by this operation will be
      * provided to you via {@link ResourceLeakDetector}.
+     *
+     * hint 表示我们传入的额外提示信息，TraceRecord 中会额外保存 hint 中的信息，reportLeak 的时候会将 hint 信息一起打印出来
      */
     ReferenceCounted touch(Object hint);
 

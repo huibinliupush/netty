@@ -262,7 +262,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     //利用PooledByteBufAllocator分配合适大小的byteBuf 初始大小为2048
                     //每一轮开始读取之前 都需要为每一轮分配独立的堆外内存 不能共用
                     byteBuf = allocHandle.allocate(allocator);
-                    //记录本次读取了多少字节数
+                    //记录本次读取了多少字节数，这里会判断是否对 byteBuf 进行扩容（面向下一次 read）但不会缩容
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
                     //如果本次没有读取到任何字节，则退出循环 进行下一轮事件轮询
                     // -1 表示客户端主动关闭了连接close或者shutdownOutput 这里均会返回-1
@@ -289,7 +289,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     byteBuf = null;
                 } while (allocHandle.continueReading());
 
-                //统计本次recvbuf读取容量情况，决定下次是否扩容或者缩容
+                //统计本轮 read loop 读取容量情况，决定是否在下一轮 read loop 开始的时候扩容或者缩容
                 allocHandle.readComplete();
                 //在NioSocketChannel的pipeline中触发ChannelReadComplete事件，表示一次read事件处理完毕
                 //但这并不表示 客户端发送来的数据已经全部读完，因为如果数据太多的话，这里只会读取16次，剩下的会等到下次read事件到来后在处理

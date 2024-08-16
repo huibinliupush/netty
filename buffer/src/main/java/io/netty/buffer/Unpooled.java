@@ -312,6 +312,7 @@ public final class Unpooled {
         case 1:
             ByteBuf buffer = buffers[0];
             if (buffer.isReadable()) {
+
                 return wrappedBuffer(buffer.order(BIG_ENDIAN));
             } else {
                 buffer.release();

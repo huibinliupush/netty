@@ -130,6 +130,7 @@ public class AdaptiveRecvByteBufAllocator extends DefaultMaxMessagesRecvByteBufA
             // the selector to check for more data. Going back to the selector can add significant latency for large
             // data transfers.
             if (bytes == attemptedBytesRead()) {
+                // 这里也会扩容，但不会缩容
                 record(bytes);
             }
             super.lastBytesRead(bytes);
@@ -138,6 +139,9 @@ public class AdaptiveRecvByteBufAllocator extends DefaultMaxMessagesRecvByteBufA
         @Override
         public int guess() {
             //预计下一次分配buffer的容量，一开始为2048
+            // 扩容有两个时机：
+            // 1. 在 do while read loop 中每 read 一次都会调用 io.netty.channel.AdaptiveRecvByteBufAllocator.HandleImpl.lastBytesRead 方法判断是否对下一次 read 进行扩容
+            // 2. 在结束 do while read loop 之后，最后调用 io.netty.channel.AdaptiveRecvByteBufAllocator.HandleImpl.readComplete 来判断是否对下一轮 read loop 进行扩容
             return nextReceiveBufferSize;
         }
 

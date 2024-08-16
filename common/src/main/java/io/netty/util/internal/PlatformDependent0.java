@@ -37,7 +37,12 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
 final class PlatformDependent0 {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(PlatformDependent0.class);
+    // 对象字段在内存模型中的偏移
     private static final long ADDRESS_FIELD_OFFSET;
+    // 在 JVM 中数组是一个对象，有对象头和实例数据区域，src 只是表示这个数组对象的起始内存地址
+    // 所以真正存储数组内容的区域距离数组对象的起始地址是有一定便偏移的 BYTE_ARRAY_BASE_OFFSET
+    // 不同类型的数组比如，byte , int , long 这些不同类型，由于其对齐规则不一样，字节填充大小不一样
+    // 所以导致数组对象内存模型中，真正存储数组数据的起始内存地址偏移也不一样，对于 byte 数组来说，偏移就是 BYTE_ARRAY_BASE_OFFSET
     private static final long BYTE_ARRAY_BASE_OFFSET;
     private static final long INT_ARRAY_BASE_OFFSET;
     private static final long INT_ARRAY_INDEX_SCALE;
@@ -58,6 +63,8 @@ final class PlatformDependent0 {
     private static final boolean RUNNING_IN_NATIVE_IMAGE = SystemPropertyUtil.contains(
             "org.graalvm.nativeimage.imagecode");
 
+    // 头文件：jdk_internal_misc_Unsafe.h
+    // 实现： unsafe.cpp
     static final Unsafe UNSAFE;
 
     // constants borrowed from murmur3
@@ -459,6 +466,7 @@ final class PlatformDependent0 {
         UNSAFE.throwException(checkNotNull(cause, "cause"));
     }
 
+    // @see java.nio.DirectByteBuffer.DirectByteBuffer(long, int)
     static boolean hasDirectBufferNoCleanerConstructor() {
         return DIRECT_BUFFER_CONSTRUCTOR != null;
     }
@@ -467,6 +475,8 @@ final class PlatformDependent0 {
         return newDirectBuffer(UNSAFE.reallocateMemory(directBufferAddress(buffer), capacity), capacity);
     }
 
+    // java.nio.DirectByteBuffer.DirectByteBuffer(long, int)
+    // 此方法分配出来的 DirectByteBuffer 内部没有 Cleaner
     static ByteBuffer allocateDirectNoCleaner(int capacity) {
         // Calling malloc with capacity of 0 may return a null ptr or a memory address that can be used.
         // Just use 1 to make it safe to use in all cases:
@@ -527,6 +537,7 @@ final class PlatformDependent0 {
     }
 
     static byte getByte(long address) {
+        // Unsafe_Get##Type
         return UNSAFE.getByte(address);
     }
 
@@ -622,6 +633,7 @@ final class PlatformDependent0 {
         // Manual safe-point polling is only needed prior Java9:
         // See https://bugs.openjdk.java.net/browse/JDK-8149596
         if (javaVersion() <= 8) {
+            // 每 copy 1G 的数据执行一下 SafePointPolling
             copyMemoryWithSafePointPolling(srcAddr, dstAddr, length);
         } else {
             UNSAFE.copyMemory(srcAddr, dstAddr, length);
@@ -644,6 +656,9 @@ final class PlatformDependent0 {
         if (javaVersion() <= 8) {
             copyMemoryWithSafePointPolling(src, srcOffset, dst, dstOffset, length);
         } else {
+            // see pd_conjoint_bytes 函数
+            // linux-x86 架构下，如果定义了 AMD64 宏则使用 memmove 库函数
+            // 没有定义则使用专门的 JVM 汇编优化代码
             UNSAFE.copyMemory(src, srcOffset, dst, dstOffset, length);
         }
     }

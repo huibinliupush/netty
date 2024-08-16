@@ -53,14 +53,18 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
 
     private final ByteBufAllocator alloc;
     private final boolean direct;
+    // 初始最大的 components 数组容量（16），后续还会扩容
     private final int maxNumComponents;
-
+    // 当前 CompositeByteBuf 中包含的 components 个数
     private int componentCount;
+    // 存储 component 的数组
     private Component[] components; // resized when needed
 
     private boolean freed;
-
+    // initSize 初始 Component 个数
+    // maxNumComponents 最大 Component 个数
     private CompositeByteBuf(ByteBufAllocator alloc, boolean direct, int maxNumComponents, int initSize) {
+        // 设置 maxCapacity
         super(AbstractByteBufAllocator.DEFAULT_MAX_CAPACITY);
 
         this.alloc = ObjectUtil.checkNotNull(alloc, "alloc");
@@ -71,6 +75,7 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
 
         this.direct = direct;
         this.maxNumComponents = maxNumComponents;
+        // 初始 Component 数组的容量为 maxNumComponents
         components = newCompArray(initSize, maxNumComponents);
     }
 
@@ -87,7 +92,9 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         this(alloc, direct, maxNumComponents, buffers.length - offset);
 
         addComponents0(false, 0, buffers, offset);
+        // 判断是否合并 component
         consolidateIfNeeded();
+        // writerIndex 为最后一个 component 的 endOffset
         setIndex0(0, capacity());
     }
 
@@ -138,7 +145,9 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
     }
 
     private static Component[] newCompArray(int initComponents, int maxNumComponents) {
+        // MAX_COMPONENT
         int capacityGuess = Math.min(AbstractByteBufAllocator.DEFAULT_MAX_COMPONENTS, maxNumComponents);
+        // 初始 Component 数组的容量为 maxNumComponents
         return new Component[Math.max(initComponents, capacityGuess)];
     }
 
@@ -373,8 +382,10 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         final int len = buffers.length, count = len - arrOffset;
 
         int readableBytes = 0;
+        // 初始为 0
         int capacity = capacity();
         for (int i = 0; i < buffers.length; i++) {
+            // 总共可读的字节数
             readableBytes += buffers[i].readableBytes();
 
             // Check if we would overflow.
@@ -384,6 +395,7 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         // only set ci after we've shifted so that finally block logic is always correct
         int ci = Integer.MAX_VALUE;
         try {
+            // cIndex >= 0 && cIndex <= componentCount
             checkComponentIndex(cIndex);
             shiftComps(cIndex, count); // will increase componentCount
             int nextOffset = cIndex > 0 ? components[cIndex - 1].endOffset : 0;
@@ -392,24 +404,38 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
                 if (b == null) {
                     break;
                 }
+                // 将 ByteBuf 封装在 Component 中
                 Component c = newComponent(ensureAccessible(b), nextOffset);
                 components[ci] = c;
+                // 下一个 Component 的 Offset 是上一个 Component 的 endOffset
                 nextOffset = c.endOffset;
             }
             return this;
         } finally {
             // ci is now the index following the last successfully added component
+            // ci = componentCount 说明是一直按照顺序向后追加 component
+            // ci < componentCount 表示在 components 数组的中间插入新的 component
             if (ci < componentCount) {
+                // 如果上面 for 循环完整的走完，ci = cIndex + count
                 if (ci < cIndex + count) {
                     // we bailed early
+                    // 上面 for 循环中有 break 的情况出现或者有异常发生
+                    // ci < componentCount ，在上面的 shiftComps 中将会涉及到 component 移动，因为要腾出位置
+                    // 如果发生异常，则将后面没有加入 components 数组的 component 位置删除掉
+                    // [ci, cIndex + count) 这段位置要删除，因为在 ci-1 处已经发生异常，重新调整 components 数组
                     removeCompRange(ci, cIndex + count);
                     for (; arrOffset < len; ++arrOffset) {
+                        // 没有添加进 CompositeByteBuf 的原生 ByteBuf 需要被 release 掉
                         ReferenceCountUtil.safeRelease(buffers[arrOffset]);
                     }
                 }
+                // （在中间插入的情况下）需要调整 ci 到 size -1 之间的 component 的相关 Offset
                 updateComponentOffsets(ci); // only need to do this here for components after the added ones
             }
             if (increaseWriterIndex && ci > cIndex && ci <= componentCount) {
+                // 本次添加的最后一个 components[ci - 1]
+                // 本次添加的第一个 components[cIndex]
+                // 最后一个 endOffset 减去第一个的 offset 就是本次添加的字节个数
                 writerIndex += components[ci - 1].endOffset - components[cIndex].offset;
             }
         }
@@ -487,9 +513,11 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         final int compCountBefore = componentCount;
         final int writerIndexBefore = writerIndex;
         try {
+            // 将原来的 CompositeByteBuf 中的所有 component 重新添加到这里的新的 CompositeByteBuf 中
             for (int cidx = from.toComponentIndex0(ridx), newOffset = capacity();; cidx++) {
                 final Component component = fromComponents[cidx];
                 final int compOffset = component.offset;
+                // 计算该 component 中可读的数据部分 [fromIdx , toIdx]
                 final int fromIdx = Math.max(ridx, compOffset);
                 final int toIdx = Math.min(widx, component.endOffset);
                 final int len = toIdx - fromIdx;
@@ -507,6 +535,8 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
                 writerIndex = writerIndexBefore + (widx - ridx);
             }
             consolidateIfNeeded();
+            // 原来的 CompositeByteBuf 要 release，因为已经被重新托管到这里了，引用控制权也重新转移到了这里，所以要 release
+            // 但如果是普通的 ByteBuf 在添加到 CompositeByteBuf 之后，则不会 release 原来的 ByteBuf
             buffer.release();
             buffer = null;
             return this;
@@ -563,6 +593,7 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         // Consolidate if the number of components will exceed the allowed maximum by the current
         // operation.
         int size = componentCount;
+        // 如果当前 component 的个数已经超过了 maxNumComponents，则将所有 component 合并成一个
         if (size > maxNumComponents) {
             consolidate0(0, size);
         }
@@ -1713,6 +1744,7 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
      */
     public CompositeByteBuf consolidate() {
         ensureAccessible();
+        // 将当前 CompositeByteBuf 内的所有 Components 合并成一个
         consolidate0(0, componentCount);
         return this;
     }
@@ -1733,19 +1765,25 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         if (numComponents <= 1) {
             return;
         }
-
+        // 将 [cIndex , endCIndex] 之间的 Components 合并成一个
         final int endCIndex = cIndex + numComponents;
         final int startOffset = cIndex != 0 ? components[cIndex].offset : 0;
+        // 计算合并范围内 Components 的存储的字节总数
         final int capacity = components[endCIndex - 1].endOffset - startOffset;
+        // 重新申请一个新的 ByteBuf
         final ByteBuf consolidated = allocBuffer(capacity);
-
+        // 将合并范围内的 Components 中的数据全部转移到新的 ByteBuf 中
         for (int i = cIndex; i < endCIndex; i ++) {
             components[i].transferTo(consolidated);
         }
         lastAccessed = null;
+        // 数据转移完成之后，将合并之后的这些 components 删除
         removeCompRange(cIndex + 1, endCIndex);
+        // 将合并之后的新 Component 存储在 cIndex 位置处
+        // 这里占时先将 newComponent 的 offset 设置为 0 ，因为大部分的操作都是从 0 开始合并
         components[cIndex] = newComponent(consolidated, 0);
         if (cIndex != 0 || numComponents != componentCount) {
+            // 如果 cIndex 不是从 0 开始的，那么就更新 newComponent 的相关 offset
             updateComponentOffsets(cIndex);
         }
     }
@@ -1872,21 +1910,35 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         final ByteBuf srcBuf; // the originally added buffer
         final ByteBuf buf; // srcBuf unwrapped zero or more times
 
+        // CompositeByteBuf 只是一个逻辑 ByteBuf，真正存储数据的是 Component 里面的 srcBuf
+        // 访问一个 CompositeByteBuf 对于用户来说和访问普通的 ByteBuf 没有任何区别
+        // 但对于它的 index 来说，比如 readerIndex , writerIndex 都需要转换成具体 Component 中 buf 的真实 index,因为真正存数据的地方在 buf 中
+        // CompositeByteBuf 的 index 加上 srcAdjustment 就是 Component 中 srcBuf 的 index,然后用这个 index 去读写数据
         int srcAdjustment; // index of the start of this CompositeByteBuf relative to srcBuf
-        int adjustment; // index of the start of this CompositeByteBuf relative to buf
 
+        // CompositeByteBuf 的 index 加上 adjustment 就是 Component 中 buf 的 index,然后用这个 index 去读写数据
+        int adjustment; // index of the start of this CompositeByteBuf relative to buf
+        // 这里我们先把 CompositeByteBuf 看做是一个逻辑上的 ByteBuf
+        // CompositeByteBuf 逻辑上存储的字节全部都封装在其底层的 component 中，每个 component 负责一段字节范围的内容存储
+        // offset 表示该 component 存储的字节起始位置，这个位置是对于 CompositeByteBuf 来说的，相对于 CompositeByteBuf 第一个字节的偏移
         int offset; // offset of this component within this CompositeByteBuf
+        // endOffset 表示该 component 存储的字节结束位置，也是下一个 component 的 offset
         int endOffset; // end offset of this component within this CompositeByteBuf
 
         private ByteBuf slice; // cached slice, may be null
 
+        // offset 表示 CompositeByteBuf 中封装的逻辑字节位置偏移，第一个 Component 这里 offset 是 0
         Component(ByteBuf srcBuf, int srcOffset, ByteBuf buf, int bufOffset,
                 int offset, int len, ByteBuf slice) {
             this.srcBuf = srcBuf;
+            // 用于将 CompositeByteBuf 的 index 转换为 srcBuf 的index
             this.srcAdjustment = srcOffset - offset;
             this.buf = buf;
+            // 用于将 CompositeByteBuf 的 index 转换为 buf 的index
             this.adjustment = bufOffset - offset;
+            // CompositeByteBuf [offset , endOffset) 这段范围的字节存储在该 Component 中
             this.offset = offset;
+            // 下一个 Component 的 offset
             this.endOffset = offset + len;
             this.slice = slice;
         }
@@ -2304,10 +2356,13 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         final int size = componentCount;
         assert from >= 0 && to <= size;
         if (to < size) {
+            // 将 components 数组中 [from , to) 这段范围的 components remove，后面的向前移动
             System.arraycopy(components, to, components, from, size - to);
         }
+        // to = size ,则直接 remove ,不需要移动 to 后面的 components，因为没有了
         int newSize = size - to + from;
         for (int i = newSize; i < size; i++) {
+            // [to , size) 之间的 components 向前移动
             components[i] = null;
         }
         componentCount = newSize;
@@ -2319,27 +2374,38 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
     }
 
     private void shiftComps(int i, int count) {
+        // 初始为 0
         final int size = componentCount, newSize = size + count;
         assert i >= 0 && i <= size && count > 0;
+        // newSize 超过了 max components（16） 则对 components 数组进行扩容
         if (newSize > components.length) {
-            // grow the array
+            // grow the array，扩容到原来的 3 / 2
             int newArrSize = Math.max(size + (size >> 1), newSize);
             Component[] newArr;
             if (i == size) {
+                // 初始状态 i = size = 0
+                // size - 1 是 Component[] 数组的最后一个元素，指定的 i 恰好越界
+                // 原来 Component[] 数组中的内容全部拷贝到 newArr 中
                 newArr = Arrays.copyOf(components, newArrSize, Component[].class);
             } else {
                 newArr = new Component[newArrSize];
                 if (i > 0) {
+                    // [0 , i) 之间的内容拷贝到 newArr 中
                     System.arraycopy(components, 0, newArr, 0, i);
                 }
                 if (i < size) {
+                    // 将剩下的 [i , size) 内容从 newArr 的 i + count 位置处开始拷贝。
+                    // 因为需要将原来的 [i , size) 这些位置让出来，添加本次新的 components，
                     System.arraycopy(components, i, newArr, i + count, size - i);
                 }
             }
+            // 扩容后的新数组
             components = newArr;
         } else if (i < size) {
+            // i < size 本次操作要覆盖原来的 [ i , i+count ） 之间的位置，所以这里需要将原来位置上的 component 向后移动
             System.arraycopy(components, i, components, i + count, size - i);
         }
+        // 更新 componentCount
         componentCount = newSize;
     }
 }

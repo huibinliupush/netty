@@ -345,6 +345,9 @@ public class HttpPostMultipartRequestDecoder implements InterfaceHttpPostRequest
             int readPos = undecodedChunk.readerIndex();
             int writable = undecodedChunk.writableBytes();
             int toWrite = buf.readableBytes();
+            // 这里的 readPos 表示可以丢弃的字节个数（已经读取的）
+            // writable < toWrite 表示当前 undecodedChunk 已经放不下了
+            // readPos + writable 表示当前 undecodedChunk 可以写入的字节数: 可丢弃的字节 + 可写的字节
             if (undecodedChunk.refCnt() == 1 && writable < toWrite && readPos + writable >= toWrite) {
                 undecodedChunk.discardReadBytes();
             }

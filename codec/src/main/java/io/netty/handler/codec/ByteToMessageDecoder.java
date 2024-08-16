@@ -116,25 +116,35 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
         @Override
         public ByteBuf cumulate(ByteBufAllocator alloc, ByteBuf cumulation, ByteBuf in) {
             if (!cumulation.isReadable()) {
+                // 之前缓存的已经解码完毕，这里将它释放，并从 in 开始重新累加。
                 cumulation.release();
                 return in;
             }
             CompositeByteBuf composite = null;
             try {
+                // cumulation 是一个 CompositeByteBuf，说明 cumulation 之前是一个被聚合过的 ByteBuf
                 if (cumulation instanceof CompositeByteBuf && cumulation.refCnt() == 1) {
                     composite = (CompositeByteBuf) cumulation;
                     // Writer index must equal capacity if we are going to "write"
                     // new components to the end
+                    // 这里需要保证 CompositeByteBuf 的 writerIndex 与 capacity 相等
+                    // 因为我们需要每次在 CompositeByteBuf 的末尾聚合添加新的 ByteBuf
                     if (composite.writerIndex() != composite.capacity()) {
                         composite.capacity(composite.writerIndex());
                     }
                 } else {
+                    // 如果 cumulation 不是 CompositeByteBuf，只是一个普通的 ByteBuf
+                    // 说明 cumulation 之前还没有被聚合过，这里是第一次聚合，所以需要先创建一个空的 CompositeByteBuf
+                    // 然后将 cumulation 添加到 CompositeByteBuf 中
                     composite = alloc.compositeBuffer(Integer.MAX_VALUE).addFlattenedComponents(true, cumulation);
                 }
+                // 将本次新接收到的 ByteBuf（in）添加累积到 CompositeByteBuf 中
                 composite.addFlattenedComponents(true, in);
                 in = null;
                 return composite;
             } finally {
+                // 聚合失败，则要 release 需要聚合的 ByteBuf
+                // 新申请的 CompositeByteBuf 也要 release 掉，因为没有聚合到任何 ByteBuf，没啥用了
                 if (in != null) {
                     // We must release if the ownership was not transferred as otherwise it may produce a leak
                     in.release();
@@ -152,6 +162,7 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
     private static final byte STATE_HANDLER_REMOVED_PENDING = 2;
 
     ByteBuf cumulation;
+    // 可以在设置 channelHandler 的时候通过 Decoder 实例的 setCumulator 灵活选择
     private Cumulator cumulator = MERGE_CUMULATOR;
     private boolean singleDecode;
     private boolean first;
@@ -270,6 +281,7 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
         if (msg instanceof ByteBuf) {
             CodecOutputList out = CodecOutputList.newInstance();
             try {
+                // 第一次收包
                 first = cumulation == null;
                 cumulation = cumulator.cumulate(ctx.alloc(),
                         first ? Unpooled.EMPTY_BUFFER : cumulation, (ByteBuf) msg);
@@ -280,6 +292,9 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
                 throw new DecoderException(e);
             } finally {
                 try {
+                    // 当把缓存中的所有 cumulation 全都解码完毕之后，此时不可读（已经没有半包了）
+                    // 这时就该释放 cumulation，重新开始下一轮的半包处理
+                    // 如果当前 cumulation 还存在半包，那么就继续积累，直到全部解码完
                     if (cumulation != null && !cumulation.isReadable()) {
                         numReads = 0;
                         cumulation.release();
@@ -287,7 +302,9 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
                     } else if (++numReads >= discardAfterReads) {
                         // We did enough reads already try to discard some bytes so we not risk to see a OOME.
                         // See https://github.com/netty/netty/issues/4275
+                        // 表示 ChannelRead 的次数
                         numReads = 0;
+                        // 如果已经读取了 discardAfterReads（16） 次了，cumulation 仍然存在半包，那么就丢弃一些已经解码完的字节
                         discardSomeReadBytes();
                     }
 
@@ -444,6 +461,7 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
                 }
 
                 int oldInputLength = in.readableBytes();
+                // 调用 decode 解码
                 decodeRemovalReentryProtection(ctx, in, out);
 
                 // Check if this handler was removed before continuing the loop.

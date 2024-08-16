@@ -32,6 +32,12 @@ import static io.netty.util.internal.PlatformDependent.BIG_ENDIAN_NATIVE_ORDER;
  * All operations get and set as {@link ByteOrder#BIG_ENDIAN}.
  */
 final class UnsafeByteBufUtil {
+    // Unaligned memory accesses occur when you try to read N bytes of data starting from an address that is not evenly divisible by N (i.e. addr % N != 0). For example, reading 4 bytes of data from address 0x10004 is fine, but reading 4 bytes of data from address 0x10005 would be an unaligned memory access.
+    // Some CPU architectures do even not support unaligned accesses at all, and if the JVM tries to do such an access, it will be killed by the operating system. While using the official JDK ByteBuffer API ensure that all accesses will be aligne
+    // Unaligned access is reading/writing a short/int/long from/to an address that is not divisible by it's size
+    // @see https://psy-lob-saw.blogspot.com/2013/07/atomicity-of-unaligned-memory-access-in.html
+    // https://docs.kernel.org/core-api/unaligned-memory-access.html
+    // JVM 对象内存模型中的规则就是为了避免 unaligned access
     private static final boolean UNALIGNED = PlatformDependent.isUnaligned();
     private static final byte ZERO = 0;
 
@@ -78,10 +84,14 @@ final class UnsafeByteBufUtil {
     }
 
     static int getInt(long address) {
+        // 如果 CPU 架构支持 memory unaligned access,那么直接就读取 4 个字节出来
+        // 不需要考虑 address 是否与 4 对齐
         if (UNALIGNED) {
             int v = PlatformDependent.getInt(address);
             return BIG_ENDIAN_NATIVE_ORDER ? v : Integer.reverseBytes(v);
         }
+        // 如果不支持 memory unaligned access，就需要考虑 address 的对齐情况
+        // 不能直接读取 4 字节，而是一个字节一个字节的读取，最后按照字节序拼接成一个 Int
         return PlatformDependent.getByte(address) << 24 |
                (PlatformDependent.getByte(address + 1) & 0xff) << 16 |
                (PlatformDependent.getByte(address + 2) & 0xff) <<  8 |

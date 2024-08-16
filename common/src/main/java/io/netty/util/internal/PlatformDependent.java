@@ -93,12 +93,17 @@ public final class PlatformDependent {
 
     private static final Throwable UNSAFE_UNAVAILABILITY_CAUSE = unsafeUnavailabilityCause0();
     private static final boolean DIRECT_BUFFER_PREFERRED;
+    // JVM 指定的 -XX:MaxDirectMemorySize 最大堆外内存
     private static final long MAX_DIRECT_MEMORY = maxDirectMemory0();
 
     private static final int MPSC_CHUNK_SIZE =  1024;
     private static final int MIN_MAX_MPSC_CAPACITY =  MPSC_CHUNK_SIZE * 2;
     private static final int MAX_ALLOWED_MPSC_CAPACITY = Pow2.MAX_POW2;
 
+    // 在 JVM 中数组是一个对象，有对象头和实例数据区域，src 只是表示这个数组对象的起始内存地址
+    // 所以真正存储数组内容的区域距离数组对象的起始地址是有一定便偏移的 BYTE_ARRAY_BASE_OFFSET
+    // 不同类型的数组比如，byte , int , long 这些不同类型，由于其对齐规则不一样，字节填充大小不一样
+    // 所以导致数组对象内存模型中，真正存储数组数据的起始内存地址偏移也不一样，对于 byte 数组来说，偏移就是 BYTE_ARRAY_BASE_OFFSET
     private static final long BYTE_ARRAY_BASE_OFFSET = byteArrayBaseOffset0();
 
     private static final File TMPDIR = tmpdir0();
@@ -159,18 +164,30 @@ public final class PlatformDependent {
         long maxDirectMemory = SystemPropertyUtil.getLong("io.netty.maxDirectMemory", -1);
 
         if (maxDirectMemory == 0 || !hasUnsafe() || !PlatformDependent0.hasDirectBufferNoCleanerConstructor()) {
+            // maxDirectMemory = 0 表示后续创建的 DirectBuffer 是带有 Cleaner 的，Netty 自己不会强制限定 maxDirectMemory 的用量，完全交给 JDK 的 maxDirectMemory 来限制
+            // 因为 Netty 限制了也没用，其底层依然依赖的是 JDK  DirectBuffer（Cleaner），JDK 会限制 maxDirectMemory 的用量
+            // 在没有 Unsafe 的情况下，那么就必须使用 Cleaner，因为如果不使用 Cleaner 的话，又没有 Unsafe，我们就无法释放 Native Memory 了
+            // 如果 JDK 本身不包含创建 NoCleaner DirectBuffer 的构造函数 —— DirectByteBuffer(long, int)，那么自然只能使用 Cleaner
             USE_DIRECT_BUFFER_NO_CLEANER = false;
+            // Netty 自身不会统计 Direct Memory 的用量，完全交给 JDK 来统计
             DIRECT_MEMORY_COUNTER = null;
         } else {
             USE_DIRECT_BUFFER_NO_CLEANER = true;
             if (maxDirectMemory < 0) {
+                // maxDirectMemory < 0 (默认 -1) 后续创建 NoCleaner DirectBuffer
+                // Netty 层面会单独限制 maxDirectMemory 用量，maxDirectMemory 的值与 -XX:MaxDirectMemorySize 的值相同
+                // 因为 JDK 不会统计和限制 NoCleaner DirectBuffer 的用量
+                // 注意，这里 Netty 的 maxDirectMemory 和 JDK 的 maxDirectMemory 是分别单独统计的
+                // 在 JVM 进程的角度来说，整体 maxDirectMemory 的用量是 -XX:MaxDirectMemorySize 的两倍（Netty用的和 JDK 用的之和）
                 maxDirectMemory = MAX_DIRECT_MEMORY;
                 if (maxDirectMemory <= 0) {
                     DIRECT_MEMORY_COUNTER = null;
                 } else {
+                    // 统计 Netty DirectMemory 的用量
                     DIRECT_MEMORY_COUNTER = new AtomicLong();
                 }
             } else {
+                // maxDirectMemory > 0 后续创建 NoCleaner DirectBuffer,Netty 层面的 maxDirectMemory 就是 io.netty.maxDirectMemory 指定的值
                 DIRECT_MEMORY_COUNTER = new AtomicLong();
             }
         }
@@ -189,8 +206,10 @@ public final class PlatformDependent {
             // only direct to method if we are not running on android.
             // See https://github.com/netty/netty/issues/2604
             if (javaVersion() >= 9) {
+                // 检查 sun.misc.Unsafe 类中是否包含有效的 invokeCleaner 方法
                 CLEANER = CleanerJava9.isSupported() ? new CleanerJava9() : NOOP;
             } else {
+                // 检查 java.nio.ByteBuffer 中是否包含了 cleaner 字段
                 CLEANER = CleanerJava6.isSupported() ? new CleanerJava6() : NOOP;
             }
         } else {
@@ -700,6 +719,10 @@ public final class PlatformDependent {
     }
 
     public static void copyMemory(byte[] src, int srcIndex, long dstAddr, long length) {
+        // 在 JVM 中数组是一个对象，有对象头和实例数据区域，src 只是表示这个数组对象的起始内存地址
+        // 所以真正存储数组内容的区域距离数组对象的起始地址是有一定便偏移的 BYTE_ARRAY_BASE_OFFSET
+        // 不同类型的数组比如，byte , int , long 这些不同类型，由于其对齐规则不一样，字节填充大小不一样
+        // 所以导致数组对象内存模型中，真正存储数组数据的起始内存地址偏移也不一样，对于 byte 数组来说，偏移就是 BYTE_ARRAY_BASE_OFFSET
         PlatformDependent0.copyMemory(src, BYTE_ARRAY_BASE_OFFSET + srcIndex, null, dstAddr, length);
     }
 
@@ -787,6 +810,8 @@ public final class PlatformDependent {
     }
 
     public static boolean useDirectBufferNoCleaner() {
+        // Netty 设计 NoCleaner 类型的 DirectByteBuf 的另外一个目的就是为了突破 JVM 对于 maxDirectMemory 用量的限制
+        // 因为 NoCleaner 的 JDK DirectByteBuffer 不会统计到 -XX:MaxDirectMemorySize 中
         return USE_DIRECT_BUFFER_NO_CLEANER;
     }
 
