@@ -42,6 +42,12 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
     private static final int DEFAULT_NUM_DIRECT_ARENA;
 
     private static final int DEFAULT_PAGE_SIZE;
+    // 4.1.75.final 变为了 4M
+    // 4.1.52.final 引入了 jemalloc4 近一步减少内存碎片
+    // https://netty.io/news/2020/09/08/4-1-52-Final.html
+    // https://netty.io/news/2022/03/10/4-1-75-Final.html
+    // https://mp.weixin.qq.com/s/JY7znnjsHrg3hCsZGnC_MQ
+    // 关于 jemalloc4 性能提升的相关讨论 ：https://github.com/netty/netty/issues/3910
     private static final int DEFAULT_MAX_ORDER; // 8192 << 11 = 16 MiB per chunk
     private static final int DEFAULT_SMALL_CACHE_SIZE;
     private static final int DEFAULT_NORMAL_CACHE_SIZE;
