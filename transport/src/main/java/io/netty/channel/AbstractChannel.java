@@ -474,11 +474,17 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             AbstractChannel.this.eventLoop = eventLoop;
-
+            // 第一次执行任务的时候，eventLoop 的 thread 为 null,这里会返回false
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
                 try {
+                    // 在这里第一次执行任务的时候，才开始创建 reactor 线程，赋值给 thread
+                    // 这里的 eventLoop 类型为 SingleThreadEventExecutor
+                    // see : io.netty.util.concurrent.SingleThreadEventExecutor.doStartThread
+                    // SingleThreadEventExecutor 里面封装的 Executor 类型为 ThreadPerTaskExecutor
+                    // 来一个任务创建一个线程，这里的线程就是 reactor 线程，它是在 doStartThread 方法中被 Executor 创建的
+                    // 之后 SingleThreadEventExecutor 中的 thread 才会被赋值，执行后续的 reactor 任务
                     eventLoop.execute(new Runnable() {
                         @Override
                         public void run() {

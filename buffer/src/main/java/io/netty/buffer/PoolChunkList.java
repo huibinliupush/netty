@@ -31,11 +31,16 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
     private static final Iterator<PoolChunkMetric> EMPTY_METRICS = Collections.<PoolChunkMetric>emptyList().iterator();
     private final PoolArena<T> arena;
     private final PoolChunkList<T> nextList;
+    // 单位百分比
     private final int minUsage;
+    // 单位百分比
     private final int maxUsage;
+    // 该 PoolChunkList 中的 PoolChunk 可以分配出去的最大内存容量 (所占 chunkSize 的百分比)
     private final int maxCapacity;
     private PoolChunk<T> head;
+    // PoolChunkList 中的 PoolChunk 剩余的最小字节数
     private final int freeMinThreshold;
+    // PoolChunkList 中的 PoolChunk 剩余的最大字节数
     private final int freeMaxThreshold;
 
     // This is only update once when create the linked like list of PoolChunkList in PoolArena constructor.
@@ -46,10 +51,16 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
 
     PoolChunkList(PoolArena<T> arena, PoolChunkList<T> nextList, int minUsage, int maxUsage, int chunkSize) {
         assert minUsage <= maxUsage;
+        // 所属 PoolArena
         this.arena = arena;
+        // 下一个 PoolChunkList
         this.nextList = nextList;
+        // 该 PoolChunkList 中的 PoolChunk 内存占用率在 [minUsage , maxUsage]
+        // 当 PoolChunk 中的内存占用率低于 minUsage 则将它移动到前一个 PoolChunkList 中 （prevList）
+        // 当 PoolChunk 中的内存占用率高于 maxUsage 则将它移动到后一个 PoolChunkList 中 （nextList）
         this.minUsage = minUsage;
         this.maxUsage = maxUsage;
+        // 计算该 PoolChunkList 中的 PoolChunk 可以分配出去的最大内存容量 (所占 chunkSize 的百分比)
         maxCapacity = calculateMaxCapacity(minUsage, chunkSize);
 
         // the thresholds are aligned with PoolChunk.usage() logic:
@@ -59,7 +70,7 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
         //      freeBytes <= chunkSize * (100 - maxUsage) / 100
         //      let freeMinThreshold = chunkSize * (100 - maxUsage) / 100, then freeBytes <= freeMinThreshold
         //
-        //  2) usage() returns an int value and has a floor rounding during a calculation,
+        //  2) usage() returns an int value and has a floor rounding during a calculation, **
         //     to be aligned absolute thresholds should be shifted for "the rounding step":
         //       freeBytes * 100 / chunkSize < 1
         //       the condition can be converted to: freeBytes < 1 * chunkSize / 100
@@ -67,13 +78,16 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
         //       freeBytes = 16777216 == freeMaxThreshold: 16777216, usage = 0 < minUsage: 1, chunkSize: 16777216
         //     At the same time we want to have zero thresholds in case of (maxUsage == 100) and (minUsage == 100).
         //
+        // PoolChunkList 中的 PoolChunk 剩余的最小字节数
         freeMinThreshold = (maxUsage == 100) ? 0 : (int) (chunkSize * (100.0 - maxUsage + 0.99999999) / 100L);
+        // PoolChunkList 中的 PoolChunk 剩余的最大字节数
         freeMaxThreshold = (minUsage == 100) ? 0 : (int) (chunkSize * (100.0 - minUsage + 0.99999999) / 100L);
     }
 
     /**
      * Calculates the maximum capacity of a buffer that will ever be possible to allocate out of the {@link PoolChunk}s
      * that belong to the {@link PoolChunkList} with the given {@code minUsage} and {@code maxUsage} settings.
+     * // 计算该 PoolChunkList 中的 PoolChunk 可以分配出去的最大内存容量
      */
     private static int calculateMaxCapacity(int minUsage, int chunkSize) {
         minUsage = minUsage0(minUsage);
@@ -118,6 +132,8 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
 
     boolean free(PoolChunk<T> chunk, long handle, int normCapacity, ByteBuffer nioBuffer) {
         chunk.free(handle, normCapacity, nioBuffer);
+        // qInit 中的 PoolChunk 的使用率为 0 % 时，仍然停留在 qInit 中不做任何改变，跳过 if 直接返回 true （PoolChunk 不会被 destroy）
+        // q000 中的 PoolChunk 的使用率低于 1 % 时（其实就是 0%），PoolChunk 会从 q000 中被删除，然后返回 false (PoolChunk 随后会被 destroy)
         if (chunk.freeBytes > freeMaxThreshold) {
             remove(chunk);
             // Move the PoolChunk down the PoolChunkList linked-list.

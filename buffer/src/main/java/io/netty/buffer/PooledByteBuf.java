@@ -35,7 +35,10 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
     protected long handle;
     protected T memory;
     protected int offset;
+    // capacity
     protected int length;
+    // 内存池实际分配的内存尺寸，注意这里并不是 maxCapacity。
+    // see : io.netty.buffer.PoolArena.allocate(io.netty.buffer.PoolThreadCache, int, int)
     int maxLength;
     PoolThreadCache cache;
     ByteBuffer tmpNioBuf;
@@ -63,16 +66,28 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
         assert !PoolChunk.isSubpage(handle) ||
                 chunk.arena.sizeClass.size2SizeIdx(maxLength) <= chunk.arena.sizeClass.smallMaxSizeIdx:
                 "Allocated small sub-page handle for a buffer size that isn't \"small.\"";
-
+        // 增加 chunk 的 pinnedBytes 计数
         chunk.incrementPinnedMemory(maxLength);
+        // 该 PooledByteBuf 归属的 chunk
         this.chunk = chunk;
+        // chunk 底层依赖的 ByteBuffer （4M）
         memory = chunk.memory;
+        // PooledByteBuf 底层依赖的 nioBuffer
+        // 其实是整个 chunk 的 nioBuffer。初始化的时候通过 memory.duplicate() 获得，后面就一直不变了，PooledByteBuf 通过相关 index 来对 chunk 内存进行操作
+        // PooledByteBuf 在释放的时候，该 nioBuffer 会缓存在 chunk 中的 cachedNioBuffers 中，默认最大可以缓存 1023 个 nioBuffer
+        // 这些缓存的 nioBuffer 全部都是一样的，都是通过 memory.duplicate() 获得的
         tmpNioBuf = nioBuffer;
+        // PooledByteBuf 背后内存池的 ByteBufAllocator
         allocator = chunk.arena.parent;
+        // 所属的 PoolThreadCache
         this.cache = cache;
+        // 底层依赖的内存块 run
         this.handle = handle;
+        // 该内存块的起始地址偏移（相对于 chunk.memory），以字节为单位
         this.offset = offset;
+        // 请求分配的内存尺寸
         this.length = length;
+        // 实际分配的内存大小（runSize）
         this.maxLength = maxLength;
     }
 

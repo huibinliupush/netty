@@ -73,6 +73,8 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         checkPositive(nThreads, "nThreads");
 
         if (executor == null) {
+            // 由 executor 创建的 IO 线程类型为 FastThreadLocalThread
+            // see: io.netty.util.concurrent.DefaultThreadFactory.newThread(java.lang.Runnable)
             executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
         }
 

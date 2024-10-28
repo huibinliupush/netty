@@ -841,6 +841,7 @@ public final class PlatformDependent {
         if (hasUnsafe()) {
             long address = directBufferAddress(buffer);
             long aligned = align(address, alignment);
+            // 从内存对齐处开始读写 buffer
             buffer.position((int) (aligned - address));
             return buffer.slice();
         }

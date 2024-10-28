@@ -27,6 +27,8 @@ public class FastThreadLocalThread extends Thread {
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(FastThreadLocalThread.class);
 
     // This will be set to true if we have a chance to wrap the Runnable.
+    // 表示当线程执行完 run 方法的时候是否会调用 FastThreadLocal.removeAll()
+    // 清理所有与当前线程绑定的 FastThreadLocal 变量
     private final boolean cleanupFastThreadLocals;
 
     private InternalThreadLocalMap threadLocalMap;

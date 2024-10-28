@@ -54,6 +54,8 @@ public final class ThreadExecutorMap {
         return new Executor() {
             @Override
             public void execute(final Runnable command) {
+                // 这里的 executor 是 SingleThreadEventExecutor 中的 executor 类型为 ThreadPerTaskExecutor，任务是创建启动 reactor 线程
+                // eventExecutor 为 SingleThreadEventExecutor 里面包装的 thread 就是 reactor 线程
                 executor.execute(apply(command, eventExecutor));
             }
         };
@@ -71,6 +73,11 @@ public final class ThreadExecutorMap {
             public void run() {
                 setCurrentEventExecutor(eventExecutor);
                 try {
+                    // 注意这里的 command 并不是 reactor 要执行的任务，而是启动 reactor 线程的任务
+                    // see io.netty.util.concurrent.SingleThreadEventExecutor.doStartThread
+                    // reactor 要执行的任务 task 会在 reactor 线程启动之前会被加入到其 SingleThreadEventExecutor 对应的 taskQueue 中
+                    // see io.netty.util.concurrent.SingleThreadEventExecutor.execute(java.lang.Runnable, boolean)
+                    // reactor 线程在启动之后，会从 taskQueue 中取出任务执行
                     command.run();
                 } finally {
                     setCurrentEventExecutor(null);

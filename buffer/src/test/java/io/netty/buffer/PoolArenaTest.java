@@ -27,9 +27,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class PoolArenaTest {
 
     private static final int PAGE_SIZE = 8192;
-    private static final int PAGE_SHIFTS = 11;
+    private static final int PAGE_SHIFTS = 13;
     //chunkSize = pageSize * (2 ^ pageShifts)
-    private static final int CHUNK_SIZE = 16777216;
+    private static final int CHUNK_SIZE = 8192 << 9;
+
+    @Test
+    public void testSize2SizeIdxForUp4k() {
+        SizeClasses sc = new SizeClasses(PAGE_SIZE, PAGE_SHIFTS, CHUNK_SIZE, 0);
+        PoolArena<ByteBuffer> arena = new PoolArena.DirectArena(null, sc);
+        int[] reqCapacities = {5000,5120, 6144, 10240, 14336, 20480, 28672};
+        for (int i = 0; i < reqCapacities.length; i ++) {
+             int sizeIndex = arena.sizeClass.size2SizeIdx(reqCapacities[i]);
+             System.out.println(sizeIndex);
+        }
+    }
 
     @Test
     public void testNormalizeCapacity() {

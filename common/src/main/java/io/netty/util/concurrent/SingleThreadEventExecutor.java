@@ -75,7 +75,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                     SingleThreadEventExecutor.class, ThreadProperties.class, "threadProperties");
 
     private final Queue<Runnable> taskQueue;
-
+    // io.netty.util.concurrent.SingleThreadEventExecutor.doStartThread 的时候赋值
+    // 由 executor 创建
     private volatile Thread thread;
     @SuppressWarnings("unused")
     private volatile ThreadProperties threadProperties;
@@ -167,6 +168,13 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         super(parent);
         this.addTaskWakesUp = addTaskWakesUp;
         this.maxPendingTasks = DEFAULT_MAX_PENDING_EXECUTOR_TASKS;
+        // 将当前 EventExecutor(NioEventLoop) 设置到 ThreadExecutorMap 的 mappings 中
+        // 后续再线程中调用 ThreadExecutorMap.currentExecutor()，如果值不为空，那么说明当前线程就是 NioEventLoop
+        // executor 类型为 ThreadPerTaskExecutor
+        // see： io.netty.util.concurrent.MultithreadEventExecutorGroup.MultithreadEventExecutorGroup(int, java.util.concurrent.Executor, io.netty.util.concurrent.EventExecutorChooserFactory, java.lang.Object...)
+
+        // 由 executor 创建的 IO 线程类型为 FastThreadLocalThread
+        // see: io.netty.util.concurrent.DefaultThreadFactory.newThread(java.lang.Runnable)
         this.executor = ThreadExecutorMap.apply(executor, this);
         this.taskQueue = ObjectUtil.checkNotNull(taskQueue, "taskQueue");
         this.rejectedExecutionHandler = ObjectUtil.checkNotNull(rejectedHandler, "rejectedHandler");
@@ -980,9 +988,13 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private void doStartThread() {
         assert thread == null;
+        // 被 ThreadExecutorMap.apply 包装过的ThreadPerTaskExecutor,来一个任务创建一个线程执行
+        // 由 executor 创建的 IO 线程类型为 FastThreadLocalThread
+        // see: io.netty.util.concurrent.DefaultThreadFactory.newThread(java.lang.Runnable)
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                // 由 ThreadPerTaskExecutor 创建的线程，来执行这个 runnable
                 thread = Thread.currentThread();
                 if (interrupted) {
                     thread.interrupt();
