@@ -16,6 +16,8 @@
 package io.netty.buffer;
 
 import io.netty.util.CharsetUtil;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.mockito.Mockito;
@@ -44,10 +46,43 @@ import static org.junit.jupiter.api.Assertions.fail;
  * Tests channel buffers
  */
 public class UnpooledTest {
-
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(UnpooledTest.class);
     private static final ByteBuf[] EMPTY_BYTE_BUFS = new ByteBuf[0];
     private static final byte[][] EMPTY_BYTES_2D = new byte[0][];
 
+    @Test
+    public void testResouceLeak() throws InterruptedException {
+        ByteBuf leakBuf = Unpooled.directBuffer(1024);
+        accessMethodA(leakBuf);
+        accessMethodB(leakBuf);
+        accessMethodC(leakBuf);
+        accessMethodD(leakBuf);
+        leakBuf = null;
+        System.gc();
+        Thread.sleep(5000);
+        Unpooled.directBuffer(16);
+    }
+
+    @Test
+    public void testMemoryLeak() throws InterruptedException {
+
+    }
+
+    private void accessMethodA(ByteBuf byteBuf) {
+        byteBuf.touch("accessMethodA");
+    }
+
+    private void accessMethodB(ByteBuf byteBuf) {
+        byteBuf.touch("accessMethodB");
+    }
+
+    private void accessMethodC(ByteBuf byteBuf) {
+        byteBuf.touch("accessMethodC");
+    }
+
+    private void accessMethodD(ByteBuf byteBuf) {
+        byteBuf.touch("accessMethodD");
+    }
     @Test
     public void testCompositeWrappedBuffer() {
         ByteBuf header = buffer(12);

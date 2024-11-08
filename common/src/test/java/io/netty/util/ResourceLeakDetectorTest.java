@@ -15,6 +15,7 @@
  */
 package io.netty.util;
 
+import io.netty.util.internal.PlatformDependent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -32,6 +33,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ResourceLeakDetectorTest {
     @SuppressWarnings("unused")
     private static volatile int sink;
+
+    @Test
+    public void testRandom() throws Throwable {
+        for (int i = 0; i < 10; i++) {
+           System.out.println(PlatformDependent.threadLocalRandom().nextInt(1));
+
+        }
+    }
 
     @Test
     @Timeout(value = 60000, unit = TimeUnit.MILLISECONDS)

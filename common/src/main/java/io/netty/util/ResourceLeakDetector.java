@@ -165,6 +165,7 @@ public class ResourceLeakDetector<T> {
             Collections.newSetFromMap(new ConcurrentHashMap<DefaultResourceLeak<?>, Boolean>());
 
     private final ReferenceQueue<Object> refQueue = new ReferenceQueue<Object>();
+    // 存储已经报告过的泄露 record , 避免重复报告
     private final Set<String> reportedLeaks =
             Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
@@ -297,6 +298,7 @@ public class ResourceLeakDetector<T> {
     }
 
     private void reportLeak() {
+        // 日志级别必须是 Error 级别
         if (!needReport()) {
             clearRefQueue();
             return;
@@ -304,15 +306,16 @@ public class ResourceLeakDetector<T> {
 
         // Detect and report previous leaks.
         for (;;) {
+            // 对应的 ByteBuffer 必须已经被 GC 回收，才会触发内存泄露的探测
             DefaultResourceLeak ref = (DefaultResourceLeak) refQueue.poll();
             if (ref == null) {
                 break;
             }
-
+            // Buffer 已经被 release 了
             if (!ref.dispose()) {
                 continue;
             }
-
+            // 将 Buffer 的堆栈访问记录 TraceRecords 打印出来
             String records = ref.getReportAndClearRecords();
             if (reportedLeaks.add(records)) {
                 if (records.isEmpty()) {
@@ -421,6 +424,7 @@ public class ResourceLeakDetector<T> {
             trackedHash = System.identityHashCode(referent);
             allLeaks.add(this);
             // Create a new Record so we always have the creation stacktrace included.
+            // 初始栈中只存放 creation stacktrace
             headUpdater.set(this, initialHint == null ?
                     new TraceRecord(TraceRecord.BOTTOM) : new TraceRecord(TraceRecord.BOTTOM, initialHint));
             this.allLeaks = allLeaks;
@@ -477,6 +481,7 @@ public class ResourceLeakDetector<T> {
                     final int numElements = oldHead.pos + 1;
                     if (numElements >= TARGET_RECORDS) {
                         final int backOffFactor = Math.min(numElements - TARGET_RECORDS, 30);
+                        // numElements 超出的越多，当前栈顶越不容易被 drop
                         if (dropped = PlatformDependent.threadLocalRandom().nextInt(1 << backOffFactor) != 0) {
                             prevHead = oldHead.next;
                         }
@@ -557,7 +562,9 @@ public class ResourceLeakDetector<T> {
         }
 
         String getReportAndClearRecords() {
+            // 清空 DefaultResourceLeak 中的 Records
             TraceRecord oldHead = headUpdater.getAndSet(this, null);
+            // 将现有的 Records 记录格式化成字符串
             return generateReport(oldHead);
         }
 
@@ -569,7 +576,7 @@ public class ResourceLeakDetector<T> {
 
             final int dropped = droppedRecordsUpdater.get(this);
             int duped = 0;
-
+            // 当前 DefaultResourceLeak 中一共有多少个 TraceRecord
             int present = oldHead.pos + 1;
             // Guess about 2 kilobytes per stack trace
             StringBuilder buf = new StringBuilder(present * 2048).append(NEWLINE);
@@ -581,11 +588,13 @@ public class ResourceLeakDetector<T> {
                 String s = oldHead.toString();
                 if (seen.add(s)) {
                     if (oldHead.next == TraceRecord.BOTTOM) {
+                        // 栈底 TraceRecord 记录了 Buffer 的创建位置
                         buf.append("Created at:").append(NEWLINE).append(s);
                     } else {
                         buf.append('#').append(i++).append(':').append(NEWLINE).append(s);
                     }
                 } else {
+                    // 重复的 TraceRecord 个数
                     duped++;
                 }
             }
@@ -612,7 +621,7 @@ public class ResourceLeakDetector<T> {
             return buf.toString();
         }
     }
-
+    // TraceRecord 打印方法调用堆栈的时候，需要排除的方法
     private static final AtomicReference<String[]> excludedMethods =
             new AtomicReference<String[]>(EmptyArrays.EMPTY_STRINGS);
 

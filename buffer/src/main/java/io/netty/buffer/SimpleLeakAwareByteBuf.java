@@ -86,7 +86,9 @@ class SimpleLeakAwareByteBuf extends WrappedByteBuf {
     public ByteBuf asReadOnly() {
         return newSharedLeakAwareByteBuf(super.asReadOnly());
     }
-
+    // SimpleLeakAwareByteBuf 只能探测 ByteBuf 是否有内存泄露的发生
+    // 其包装的 ResourceLeakTracker 堆栈记录中只有 ByteBuf 的创建位置
+    // 后面不能添加访问堆栈
     @Override
     public ByteBuf touch() {
         return this;
@@ -134,8 +136,10 @@ class SimpleLeakAwareByteBuf extends WrappedByteBuf {
     private ByteBuf unwrappedDerived(ByteBuf derived) {
         // We only need to unwrap SwappedByteBuf implementations as these will be the only ones that may end up in
         // the AbstractLeakAwareByteBuf implementations beside slices / duplicates and "real" buffers.
-        ByteBuf unwrappedDerived = unwrapSwapped(derived);
-
+        // 如果 derived 已经是一个 AbstractPooledDerivedByteBuf （视图 buf）,那么这里获取的是其 rootParent，最底层真实的 PooledByteBuf
+        // 如果 derived 是一个 SwappedByteBuf，这里也会持续循环 unwrap，直到获取最底层的真实 PooledByteBuf
+        ByteBuf unwrappedDerived = unwrapSwapped(derived); // rootParent
+        // unwrappedDerived（最底层）仍然是一个 PooledBuf 视图
         if (unwrappedDerived instanceof AbstractPooledDerivedByteBuf) {
             // Update the parent to point to this buffer so we correctly close the ResourceLeakTracker.
             ((AbstractPooledDerivedByteBuf) unwrappedDerived).parent(this);
