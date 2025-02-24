@@ -29,6 +29,8 @@ public class FastThreadLocalThread extends Thread {
     // This will be set to true if we have a chance to wrap the Runnable.
     // 表示当线程执行完 run 方法的时候是否会调用 FastThreadLocal.removeAll()
     // 清理所有与当前线程绑定的 FastThreadLocal 变量
+
+    // Runnable 需要被 FastThreadLocalRunnable 包装，设置为 true
     private final boolean cleanupFastThreadLocals;
 
     private InternalThreadLocalMap threadLocalMap;

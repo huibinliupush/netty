@@ -47,6 +47,19 @@ public class FastThreadLocalTest {
     }
 
     @Test
+    public void TestExpand() {
+        int index = 70;
+        int newCapacity = index;
+        newCapacity |= newCapacity >>>  1;
+        newCapacity |= newCapacity >>>  2;
+        newCapacity |= newCapacity >>>  4;
+        newCapacity |= newCapacity >>>  8;
+        newCapacity |= newCapacity >>> 16;
+        newCapacity ++;
+        System.out.println(newCapacity);
+    }
+
+    @Test
     public void testGetIfExists() {
         FastThreadLocal<Boolean> threadLocal = new FastThreadLocal<Boolean>() {
             @Override
