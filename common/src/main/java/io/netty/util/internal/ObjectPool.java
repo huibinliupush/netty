@@ -57,6 +57,7 @@ public abstract class ObjectPool<T> {
          * {@link Handle#recycle(Object)}.
          *
          * @param handle can NOT be null.
+         * 接口访问权限默认为 public
          */
         T newObject(Handle<T> handle);
     }
