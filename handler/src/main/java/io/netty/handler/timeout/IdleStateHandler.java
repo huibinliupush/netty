@@ -281,6 +281,7 @@ public class IdleStateHandler extends ChannelDuplexHandler {
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (readerIdleTimeNanos > 0 || allIdleTimeNanos > 0) {
             reading = true;
+            // read 之后，这里又会恢复到 true, 那么下一次读空闲的时候，产生的空闲时间就是 first 了
             firstReaderIdleEvent = firstAllIdleEvent = true;
         }
         ctx.fireChannelRead(msg);
@@ -497,6 +498,12 @@ public class IdleStateHandler extends ChannelDuplexHandler {
                 readerIdleTimeout = schedule(ctx, this, readerIdleTimeNanos, TimeUnit.NANOSECONDS);
 
                 boolean first = firstReaderIdleEvent;
+                // 当产生一次空闲事件之后，这里就会变成 false
+                // 当下一次读事件产生之后，又会设置为 true, 也就是说每一次读，都会设置为 true
+                // io.netty.handler.timeout.IdleStateHandler.channelRead
+
+                // 这样一来，针对某一次读事件之后，第一次产生的空闲事件 first 就是 true , 后续持续空闲事件 first 就是 false
+                // 下一次读事件产生之后，first 又会变成 true
                 firstReaderIdleEvent = false;
 
                 try {
@@ -506,7 +513,7 @@ public class IdleStateHandler extends ChannelDuplexHandler {
                     ctx.fireExceptionCaught(t);
                 }
             } else {
-                // Read occurred before the timeout - set a new timeout with shorter delay.
+                // reading = true : Read occurred before the timeout - set a new timeout with shorter delay.
                 readerIdleTimeout = schedule(ctx, this, nextDelay, TimeUnit.NANOSECONDS);
             }
         }
