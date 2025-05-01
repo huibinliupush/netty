@@ -73,7 +73,7 @@ final class CodecOutputList extends AbstractList<Object> implements RandomAccess
                 return new CodecOutputList(NOOP_RECYCLER, 4);
             }
             --count;
-
+            // 从最近的一个开始取，局部性好
             int idx = (currentIdx - 1) & mask;
             CodecOutputList list = elements[idx];
             currentIdx = idx;

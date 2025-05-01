@@ -283,6 +283,7 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
             try {
                 // 第一次收包
                 first = cumulation == null;
+                // 将新接收的 msg 不断累积到 cumulation 中
                 cumulation = cumulator.cumulate(ctx.alloc(),
                         first ? Unpooled.EMPTY_BUFFER : cumulation, (ByteBuf) msg);
                 callDecode(ctx, cumulation, out);
@@ -310,6 +311,7 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
 
                     int size = out.size();
                     firedChannelRead |= out.insertSinceRecycled();
+                    // 将 out 中解码出来的所有 object, 挨个触发 fireChannelRead
                     fireChannelRead(ctx, out, size);
                 } finally {
                     out.recycle();

@@ -99,17 +99,21 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         ByteBuf buf = null;
         try {
+            // MessageToByteEncoder<I> 中的泛型 I 用于指定该编码器可以编码的类型
+            // 如果 msg 不是泛型 I 指定的类型，那么就拒绝编码，继续把 msg  沿着 pipeline 向前传递
             if (acceptOutboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
-                I cast = (I) msg;
+                I cast = (I) msg; // 转换指定的编码类型
                 buf = allocateBuffer(ctx, cast, preferDirect);
                 try {
+                    // 将 msg 序列化到 buf 中
                     encode(ctx, cast, buf);
                 } finally {
                     ReferenceCountUtil.release(cast);
                 }
 
                 if (buf.isReadable()) {
+                    // 将序列化之后的 buf 向前传递
                     ctx.write(buf, promise);
                 } else {
                     buf.release();
@@ -117,6 +121,7 @@ public abstract class MessageToByteEncoder<I> extends ChannelOutboundHandlerAdap
                 }
                 buf = null;
             } else {
+                // msg 不是指定的编码类型，继续向前传递
                 ctx.write(msg, promise);
             }
         } catch (EncoderException e) {
