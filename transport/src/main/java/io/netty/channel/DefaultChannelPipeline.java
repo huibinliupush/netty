@@ -575,6 +575,18 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
         synchronized (this) {
             //从pipeline的双向列表中删除指定channelHandler对应的context
+            /**
+             * 注意这里只是将 ctx 从 pipeline 中删除而已
+             * 但是 ctx 的 next , prev 指针还是不变的，并没有被置为 null
+             * 后续会触发对应 ChannelHandler 的 HandlerRemoved 方法
+             * io.netty.channel.AbstractChannelHandlerContext#callHandlerRemoved()
+             *
+             * 在 HandlerRemoved 方法中，我们还是可以继续向后传播 fireChannelRead  已经读取的 ByteBuffer
+             * 不用担心 ByteBuffer 被泄露，继续由后续的 channelHandler 负责 release
+             *
+             * io.netty.handler.codec.ByteToMessageDecoder#handlerRemoved(io.netty.channel.ChannelHandlerContext)
+             * 当 ByteToMessageDecoder 被删除之后，还未解码完毕的 bytebuffer 可以继续向后传播
+             * */
             atomicRemoveFromHandlerList(ctx);
 
             // If the registered is false it means that the channel was not registered on an eventloop yet.

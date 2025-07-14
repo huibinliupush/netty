@@ -261,7 +261,17 @@ public abstract class ByteToMessageDecoder extends ChannelInboundHandlerAdapter 
             numReads = 0;
             int readable = buf.readableBytes();
             if (readable > 0) {
-                ctx.fireChannelRead(buf);
+                /**
+                 * io.netty.channel.DefaultChannelPipeline#remove(io.netty.channel.AbstractChannelHandlerContext)
+                 *
+                 * 当 ByteToMessageDecoder 被删除之后，netty 只是将其对应的 ChannelHandlerContext 从 pipeline 中删除
+                 * 但是 ChannelHandlerContext 的 next ,prev 指针还是不变的，并没有被置为 null
+                 *
+                 * 所以这里还是可以继续向后 fireChannelRead , buf 未解码完的 ，可以继续由后续 channel handler 处理
+                 * 不用担心由于 remove 了 ByteToMessageDecoder，而导致未解码完的 buf 泄露
+                 *
+                 * */
+                ctx.fireChannelRead(buf); // next 指针并没有置为 null , 可以继续向后传播
                 ctx.fireChannelReadComplete();
             } else {
                 buf.release();

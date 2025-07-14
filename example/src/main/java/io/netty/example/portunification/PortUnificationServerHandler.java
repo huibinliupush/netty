@@ -114,6 +114,8 @@ public class PortUnificationServerHandler extends ByteToMessageDecoder {
         ChannelPipeline p = ctx.pipeline();
         p.addLast("ssl", sslCtx.newHandler(ctx.alloc()));
         p.addLast("unificationA", new PortUnificationServerHandler(sslCtx, false, detectGzip));
+        // io.netty.handler.codec.ByteToMessageDecoder.handlerRemoved
+        // 在 handlerRemoved 方法中会将本次 bytebuffer 继续向后 fireChannelRead
         p.remove(this);
     }
 
@@ -122,6 +124,8 @@ public class PortUnificationServerHandler extends ByteToMessageDecoder {
         p.addLast("gzipdeflater", ZlibCodecFactory.newZlibEncoder(ZlibWrapper.GZIP));
         p.addLast("gzipinflater", ZlibCodecFactory.newZlibDecoder(ZlibWrapper.GZIP));
         p.addLast("unificationB", new PortUnificationServerHandler(sslCtx, detectSsl, false));
+        // io.netty.handler.codec.ByteToMessageDecoder.handlerRemoved
+        // 在 handlerRemoved 方法中会将本次 bytebuffer 继续向后 fireChannelRead
         p.remove(this);
     }
 
@@ -131,6 +135,8 @@ public class PortUnificationServerHandler extends ByteToMessageDecoder {
         p.addLast("encoder", new HttpResponseEncoder());
         p.addLast("deflater", new HttpContentCompressor());
         p.addLast("handler", new HttpSnoopServerHandler());
+        // io.netty.handler.codec.ByteToMessageDecoder.handlerRemoved
+        // 在 handlerRemoved 方法中会将本次 bytebuffer 继续向后 fireChannelRead
         p.remove(this);
     }
 
