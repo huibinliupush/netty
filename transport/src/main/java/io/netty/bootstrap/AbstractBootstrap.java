@@ -59,7 +59,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     //Main Reactor线程组
     volatile EventLoopGroup group;
     @SuppressWarnings("deprecation")
-    //用于创建ServerSocketChannel  ReflectiveChannelFactory
+    // 用于创建ServerSocketChannel  ReflectiveChannelFactory
+    // 由 io.netty.bootstrap.AbstractBootstrap.channel 方法进行设置，ServerBootStrap 同理
+    // 客户端为 NioSocketChannel or EpollSocketChannel
     private volatile ChannelFactory<? extends C> channelFactory;
     //服务端监听地址
     private volatile SocketAddress localAddress;
@@ -335,10 +337,13 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
-            //创建NioServerSocketChannel
+        //serverBootStrap设置的是NioServerSocketChannel
         //ReflectiveChannelFactory通过泛型，反射，工厂的方式灵活创建不同类型的channel
+        // bootStrap 设置的是 NioSocketChannel
+        // 里边自然包含了底层 jdk 的 channel
         channel = channelFactory.newChannel();
-        //初始化NioServerSocketChannel
+        //初始化NioServerSocketChannel（serverBootStrap）
+        // 初始化 NioSocketChannel（bootStrap）
         init(channel);
     } catch (Throwable t) {
         if (channel != null) {
@@ -369,7 +374,11 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         //    i.e. It's safe to attempt bind() or connect() now:
         //         because bind() or connect() will be executed *after* the scheduled registration task is executed
         //         because register(), bind(), and connect() are all bound to the same thread.
-
+        // 必须先要确保注册成功，否则等 channel  bind 或者 connect 之后，就无法向 selectedKey 添加 interestOps，无法响应对应的 io 事件
+        // 但是 channel 已经开始 bind 或者 connect 了，从而无法得知 bind , connect 是否成功
+        // 这里的 register 只是把 channel register 到 selector 获取对应的 selectedKey ,但是对应的 interestOps 是 0
+        // 等到 bind , connect 之后再去注册对应的 OP 事件
+        // see : io.netty.channel.socket.nio.NioSocketChannel.doConnect
         return regFuture;
     }
 

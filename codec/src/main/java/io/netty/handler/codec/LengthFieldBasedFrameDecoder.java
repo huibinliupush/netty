@@ -44,10 +44,10 @@ import io.netty.channel.ChannelHandlerContext;
  * length field.  Therefore, it can be decoded with the simplistic parameter
  * combination.
  * <pre>
- * <b>lengthFieldOffset</b>   = <b>0</b>
- * <b>lengthFieldLength</b>   = <b>2</b>
+ * <b>lengthFieldOffset</b>   = <b>0</b> length 字段在 buf 中的偏移
+ * <b>lengthFieldLength</b>   = <b>2</b> length 字段在 buf 中的长度
  * lengthAdjustment    = 0
- * initialBytesToStrip = 0 (= do not strip header)
+ * initialBytesToStrip = 0 (= do not strip header) 连着 length 字段一起解码，该参数表示从哪里开始真正的解码数据
  *
  * BEFORE DECODE (14 bytes)         AFTER DECODE (14 bytes)
  * +--------+----------------+      +--------+----------------+
@@ -67,7 +67,7 @@ import io.netty.channel.ChannelHandlerContext;
  * lengthFieldOffset   = 0
  * lengthFieldLength   = 2
  * lengthAdjustment    = 0
- * <b>initialBytesToStrip</b> = <b>2</b> (= the length of the Length field)
+ * <b>initialBytesToStrip</b> = <b>2</b> (= the length of the Length field) 表示解码的时候跳过 length 字段直接从 Actual Content 位置解码
  *
  * BEFORE DECODE (14 bytes)         AFTER DECODE (12 bytes)
  * +--------+----------------+      +----------------+
@@ -78,6 +78,14 @@ import io.netty.channel.ChannelHandlerContext;
  *
  * <h3>2 bytes length field at offset 0, do not strip header, the length field
  *     represents the length of the whole message</h3>
+ *     一般默认情况下 length 字段中的值表示其后面内容的长度，但并不包括 length 字段本身
+ *     比如上面的例子中，length 字段中的值表示的是 Actual Content 的长度 ，lengthAdjustment = 0 （默认情况下）
+ *
+ *     但有时候 length 字段中的值表示的是整个 message 的长度（包括 length 字段）lengthAdjustment = -2
+ *
+ *     所以 lengthAdjustment 的主要作用就是用来调节 length 字段中的值表示的内容
+ *     lengthAdjustment = 0  默认情况下表示 Actual Content
+ *     lengthAdjustment = -2 表示 Length + Actual Content
  *
  * In most cases, the length field represents the length of the message body
  * only, as shown in the previous examples.  However, in some protocols, the
@@ -127,7 +135,7 @@ import io.netty.channel.ChannelHandlerContext;
  * <pre>
  * lengthFieldOffset   = 0
  * lengthFieldLength   = 3
- * <b>lengthAdjustment</b>    = <b>2</b> (= the length of Header 1)
+ * <b>lengthAdjustment</b>    = <b>2</b> (= the length of Header 1) ：Length 只表示 Actual Content 的长度，lengthAdjustment 用于指示 length 字段表示的内容
  * initialBytesToStrip = 0
  *
  * BEFORE DECODE (17 bytes)                      AFTER DECODE (17 bytes)
@@ -185,15 +193,21 @@ import io.netty.channel.ChannelHandlerContext;
  * @see LengthFieldPrepender
  */
 public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
-
+    // 待解码 message 的最大长度
     private final ByteOrder byteOrder;
     private final int maxFrameLength;
+    // 用于表示 length 字段在 buf 中的偏移
     private final int lengthFieldOffset;
+    // 用于表示 length 字段在 buf 中的长度
     private final int lengthFieldLength;
+    // lengthFieldOffset + lengthFieldLength
     private final int lengthFieldEndOffset;
+    // 用于表示 length 字段所表示的内容，默认为 0 ， length 字段表示内容长度为其后面的字节（不包括 length 字段以及 length 字段前面的字节内容）
     private final int lengthAdjustment;
+    // 表示需要解码的内容，跳过 initialBytesToStrip 个字节开始解码，之前的字节忽略
     private final int initialBytesToStrip;
     private final boolean failFast;
+    // see : io.netty.handler.codec.LengthFieldBasedFrameDecoder.exceededFrameLength
     private boolean discardingTooLongFrame;
     private long tooLongFrameLength;
     private long bytesToDiscard;
@@ -361,14 +375,21 @@ public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
     }
 
     private void exceededFrameLength(ByteBuf in, long frameLength) {
+        // frameLength 这里表示待解码内容的结束位置
+        // discard 表示 ByteBuf 中除了 frame 还有多少多余的未读字节数
         long discard = frameLength - in.readableBytes();
         tooLongFrameLength = frameLength;
 
         if (discard < 0) {
             // buffer contains more bytes then the frameLength so we can discard all now
+            // buffer 中包含 frame 以及多余的其他字节，这里直接全部丢弃
+            // frameLength 这里表示待解码内容的结束位置,直接全部跳过
             in.skipBytes((int) frameLength);
         } else {
             // Enter the discard mode and discard everything received so far.
+            // buffer 中接收到的字节数全部是这个 frame 或者是部分 frame
+            // 但根据之前通过 length 字段计算出的 frame 长度来说已经超过了 maxFrameLength 的要求
+            // 所以全部丢弃已经接收的字节
             discardingTooLongFrame = true;
             bytesToDiscard = discard;
             in.skipBytes(in.readableBytes());
@@ -392,29 +413,34 @@ public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
      * @param   in              the {@link ByteBuf} from which to read data
      * @return  frame           the {@link ByteBuf} which represent the frame or {@code null} if no frame could
      *                          be created.
+     *                          按照 length 相关的参数，从 in 中提取 message 的完整内容并包装成 ByteBuf 返回
      */
     protected Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
         if (discardingTooLongFrame) {
             discardingTooLongFrame(in);
         }
-
+        // 未达到解码 length 字段的长度
         if (in.readableBytes() < lengthFieldEndOffset) {
             return null;
         }
-
+        // buf 中实际 LengthFieldOffset
         int actualLengthFieldOffset = in.readerIndex() + lengthFieldOffset;
+        // 从 buf 中的 actualLengthFieldOffset 处读取 lengthFieldLength 长度的 bytes
         long frameLength = getUnadjustedFrameLength(in, actualLengthFieldOffset, lengthFieldLength, byteOrder);
 
         if (frameLength < 0) {
+            // in.skipBytes(lengthFieldEndOffset)
             failOnNegativeLengthField(in, frameLength, lengthFieldEndOffset);
         }
-
+        // lengthAdjustment + lengthFieldEndOffset 表示 length 字段表示的内容（长度）从哪里开始算起
+        // 加上 frameLength 之后表示，内容的结束位置
         frameLength += lengthAdjustment + lengthFieldEndOffset;
 
         if (frameLength < lengthFieldEndOffset) {
+            // in.skipBytes(lengthFieldEndOffset)
             failOnFrameLengthLessThanLengthFieldEndOffset(in, frameLength, lengthFieldEndOffset);
         }
-
+        // 内容的结束位置已经超过了 message 规定的最大长度
         if (frameLength > maxFrameLength) {
             exceededFrameLength(in, frameLength);
             return null;
@@ -422,6 +448,7 @@ public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
 
         // never overflows because it's less than maxFrameLength
         int frameLengthInt = (int) frameLength;
+        // buffer 中的字节数不够一个 frame
         if (in.readableBytes() < frameLengthInt) {
             return null;
         }
@@ -429,11 +456,13 @@ public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
         if (initialBytesToStrip > frameLengthInt) {
             failOnFrameLengthLessThanInitialBytesToStrip(in, frameLength, initialBytesToStrip);
         }
-        in.skipBytes(initialBytesToStrip);
+        in.skipBytes(initialBytesToStrip); // 跳过 initialBytesToStrip 开始解码
 
         // extract frame
         int readerIndex = in.readerIndex();
+        // actualFrameLength 表示 frame 的结束位置（跳过 initialBytesToStrip）
         int actualFrameLength = frameLengthInt - initialBytesToStrip;
+        // buffer.retainedSlice(index, length)
         ByteBuf frame = extractFrame(ctx, in, readerIndex, actualFrameLength);
         in.readerIndex(readerIndex + actualFrameLength);
         return frame;

@@ -385,12 +385,15 @@ public abstract class AbstractNioChannel extends AbstractChannel {
                  * 这里主要是为了获取channel注册后对应的selectionKey，注意这里注册的监听事件为0
                  * 对于ServerSocketChannel来说 在bind操作成功后 才会去注册OP_ACCEPT事件
                  * 对于SocketChannel来说，在注册成功后 就会去注册OP_READ事件
+                 * 对于 bootStrap 来说，发起 connect 之后才会去注册 OP_CONNECT,通过 selectionKey 修改它 interestOps
+                 * see : io.netty.channel.socket.nio.NioSocketChannel#doConnect(java.net.SocketAddress, java.net.SocketAddress)
                  *
                  * 同时这里也是Netty自定义的channel和JDK NIO中的SelectableChannel关联的地方，将netty自定义的channel对象
                  * 附着在selectionKey的attechment属性上，这样在每次 Selector 对象进行事件循环时，
                  * Netty 都可以从返回的 JDK 底层 Channel 中获得自己的 Channel 对象
                  *
                  * */
+                // 这里主要目的就是先获取 selectionKey ， 最后在真正注册的地方，通过修改 selectionKey 的 interestOps 完成事件注册
                 selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
                 return;
             } catch (CancelledKeyException e) {

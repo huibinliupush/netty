@@ -152,6 +152,7 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
      * @see #connect()
      */
     private ChannelFuture doResolveAndConnect(final SocketAddress remoteAddress, final SocketAddress localAddress) {
+        // DefaultChannelPromise
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
 
@@ -159,10 +160,12 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
             if (!regFuture.isSuccess()) {
                 return regFuture;
             }
+            // 注册到 selector 之后才会真正发起 connect
             return doResolveAndConnect0(channel, remoteAddress, localAddress, channel.newPromise());
         } else {
             // Registration future is almost always fulfilled already, but just in case it's not.
             final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+            // 注册到 selector 之后才会真正发起 connect
             regFuture.addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
@@ -176,6 +179,7 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
                     } else {
                         // Registration was successful, so set the correct executor to use.
                         // See https://github.com/netty/netty/issues/2586
+                        // 注册到 selector 之后才会真正发起 connect
                         promise.registered();
                         doResolveAndConnect0(channel, remoteAddress, localAddress, promise);
                     }
