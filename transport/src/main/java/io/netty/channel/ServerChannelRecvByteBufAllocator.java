@@ -20,6 +20,8 @@ package io.netty.channel;
  */
 public final class ServerChannelRecvByteBufAllocator extends DefaultMaxMessagesRecvByteBufAllocator {
     public ServerChannelRecvByteBufAllocator() {
+        // 后续会在 io.netty.channel.DefaultChannelConfig.setRecvByteBufAllocator(io.netty.channel.RecvByteBufAllocator, io.netty.channel.ChannelMetadata)
+        // 中将 maxMessagesPerRead 设置为 16
         super(1, true);
     }
 
