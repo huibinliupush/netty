@@ -79,12 +79,14 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             AtomicReferenceFieldUpdater.newUpdater(
                     SingleThreadEventExecutor.class, ThreadProperties.class, "threadProperties");
 
-    private final Queue<Runnable> taskQueue;
-
+    private final Queue<Runnable> taskQueue; // 无界 mpsc
+    // evenloop 线程，启动之后才会设置。see: io.netty.util.concurrent.SingleThreadEventExecutor.doStartThread
     private volatile Thread thread;
     @SuppressWarnings("unused")
     private volatile ThreadProperties threadProperties;
     //ThreadPerTaskExecutor 用于启动Reactor线程
+    //see : io.netty.util.internal.ThreadExecutorMap.apply(java.util.concurrent.Executor, io.netty.util.concurrent.EventExecutor)
+    //之所以每个 event loop 设置一个，是因为绑定的 eventExecutor 不同。每个 event loop 线程绑定一个 eventExecutor 实例在 ThreadExecutorMap 中
     private final Executor executor;
     private volatile boolean interrupted;
 
@@ -97,7 +99,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     //@see io.netty.util.concurrent.SingleThreadEventExecutor.wakesUpForTask
     //初始化为false
     private final boolean addTaskWakesUp;
-
+    //Reactor异步任务队列的大小，最小16，默认maxValue
     private final int maxPendingTasks;
     private final RejectedExecutionHandler rejectedExecutionHandler;
 
@@ -193,11 +195,13 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         super(parent);
         //向Reactor添加任务时，是否唤醒Selector停止轮询IO就绪事件，马上执行异步任务 初始化为false
         this.addTaskWakesUp = addTaskWakesUp;
-        //Reactor异步任务队列的大小
+        //Reactor异步任务队列的大小，最小16，默认maxValue
         this.maxPendingTasks = DEFAULT_MAX_PENDING_EXECUTOR_TASKS;
         //用于启动Reactor线程的executor -> ThreadPerTaskExecutor
+        //see : io.netty.util.internal.ThreadExecutorMap.apply(java.util.concurrent.Executor, io.netty.util.concurrent.EventExecutor)
+        //之所以每个 event loop 设置一个，是因为绑定的 eventExecutor 不同。每个 event loop 线程绑定一个 eventExecutor 实例在 ThreadExecutorMap 中
         this.executor = ThreadExecutorMap.apply(executor, this);
-        //普通任务队列
+        //无界普通任务队列
         this.taskQueue = ObjectUtil.checkNotNull(taskQueue, "taskQueue");
         //任务队列满时的拒绝策略
         this.rejectedExecutionHandler = ObjectUtil.checkNotNull(rejectedHandler, "rejectedHandler");
@@ -519,7 +523,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             // Check timeout every 64 tasks because nanoTime() is relatively expensive.
             // XXX: Hard-coded value - will make it configurable if it is really a problem.
             //每运行64个异步任务 检查一下 是否达到 执行deadline
-            if ((runTasks & 0x3F) == 0) {
+            if ((runTasks & 0x3F) == 0) { // runTasks & 63
                 lastExecutionTime = ScheduledFutureTask.nanoTime();
                 if (lastExecutionTime >= deadline) {
                     break;

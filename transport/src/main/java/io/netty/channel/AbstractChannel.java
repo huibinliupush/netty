@@ -494,6 +494,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     register0(promise);
                 } else {
                     try {
+                        // 第一次启动 event loop
                         eventLoop.execute(new Runnable() {
                             @Override
                             public void run() {
@@ -529,6 +530,12 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 // user may already fire events through the pipeline in the ChannelFutureListener.
 
                 /**
+                 * 当 channel 为注册到 event loop 之前，向 channel pipine 中添加 handler 时，比如 serverBootStrap#init
+                 * 这时不会立即调用 handler 的 handlerAdded 回调，而是将其封装成 PendingHandlerAddedTask 插入 pipine 中的 pendingHandlerCallbackHead 队列
+                 * 当这里 channel 完成注册之后，开始回调 pipine 中的 pendingHandlerCallbackHead 队列执行其中的 PendingHandlerAddedTask 回调 hanlder 的 added 方法
+                 *
+                 * 如果向 pipine 添加 handler 的时候 channel 已经完成注册，那么就直接调用 handlerAdded，不需要添加 PendingHandlerAddedTask
+                 *
                  * 调用pipeline中的任务链表，执行PendingHandlerAddedTask和PendingHandlerRemovedTask任务
                  * 回调当前pipeline中channelHandler中的handlerAdded或者handlerRemoved
                  *
@@ -538,13 +545,18 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                  * ServerSocketChannel -> initChannel
                  * SocketChannel -> echoserver -> ServerBootstrapAcceptor
                  * */
-                pipeline.invokeHandlerAddedIfNeeded();
+                pipeline.invokeHandlerAddedIfNeeded();// 触发 handlerAdded 方法，handlerContext 状态变为 ADD_COMPLETE
+                // 此时 pipeline 已经就被初始化好了，所有 handler 已经添加进去了
+                // 对于 serverSocketChannel 来说，此时用户指定的所有 handler 已经添加到 pipeline 中了
+                // 唯独 acceptor 的添加任务在 event loop 中的 taskQueue 中
+                // 对于 socketChannel 来说此时 pipine 就已经全部初始化好了
 
                 /**
                  * 服务端ServerSocketChannel注册成功后 会走这里safeSetSuccess
                  * notify promise 回调io.netty.bootstrap.AbstractBootstrap.doBind -> regFuture 执行bind操作
                  * */
                 safeSetSuccess(promise);
+                // 此时 doBind 任务也已经添加到 event loop 中的 taskQueue 中
                 //触发channelRegister事件
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
@@ -562,7 +574,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     if (firstRegistration) {
                         //触发channelActive事件
                         pipeline.fireChannelActive();
-                    } else if (config().isAutoRead()) {
+                    } else if (config().isAutoRead()) { // 背压机制
                         // This channel was registered before and autoRead() is set. This means we need to begin read
                         // again so that we process inbound data.
                         //
@@ -570,6 +582,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         beginRead();
                     }
                 }
+                // event loop 执行完这里的 register0 函数，转而执行 taskQueue 中的任务
+                // 1. 添加 acceptor 进 serverSocketChannel 的 pipeline
+                // 2. 执行 doBind 绑定任务（触发 bind 事件），触发 channelActive ，然后触发 read 事件向 selectKey 注册 accept 事件
             } catch (Throwable t) {
                 // Close the channel directly to avoid FD leak.
                 closeForcibly();
@@ -1175,7 +1190,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         /**
          * 用于在outbound回调中触发inbound回调，比如close中触发inActive 需要延后触发
          * 因为outbound回调有可能又是在inbound中触发的
-         *
+         * 比如这里是在 bind 回调中触发 channelActive
          * */
         private void invokeLater(Runnable task) {
             try {

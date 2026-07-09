@@ -83,6 +83,8 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                             break;
                         }
                         if (localRead < 0) {
+                            // NioServerSocketChannel 不会返回 -1
+                            // 这里是处理其他类型的 serverSocketChannel，比如 NioDataGramChannel
                             closed = true;
                             break;
                         }
@@ -96,6 +98,10 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
 
                 int size = readBuf.size();
                 for (int i = 0; i < size; i ++) {
+                    // 在一开始 channel 监听事件的时候，doBeginRead 的时候会设置为 true
+                    // channel 事件活跃读取成功之后会设置为 false, 每次读取完成都会设置 false
+                    // channelReadComplete 之后如果是 autoRead, 则会触发 read 事件，doBeginRead 的时候会设置为 true
+                    // 是否在等待读取数据（channelActive之后，ChannelReadComplete之后都会设置为 true）,正在读取的时候设置 false
                     readPending = false;
                     //NioServerSocketChannel对应的pipeline中传播read事件
                     //io.netty.bootstrap.ServerBootstrap.ServerBootstrapAcceptor.channelRead
@@ -107,6 +113,11 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 //统计本次读取数据的容量，适当的对buffer进行扩容缩容
                 allocHandle.readComplete();
                 //触发readComplete事件传播
+                // 如果是 autoRead 则在再次出发 read 事件 readPending 设置 true
+                // 如果channel对应的selectionKey 已经监听了 ready 事件就不需要在监听了，如果没有监听就设置 interestOps
+                // 目的有两个：
+                // 1: 每次 readComplete 之后都要保证设置 readPending = true  （前提是 autoRead = true）
+                // 2: 每次 readComplete 之后都要判断一下 autoRead, 如果已经监听则忽略，如果没有监听则监听，达到动态开启 autoRead 的效果
                 pipeline.fireChannelReadComplete();
 
                 if (exception != null) {
@@ -128,6 +139,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
                 //
                 // See https://github.com/netty/netty/issues/2254
+                // readPending = false 的情况下是 channel 正在读取的时候，没有触发 channelReadComplete 之前
                 if (!readPending && !config.isAutoRead()) {
                     removeReadOp();
                 }

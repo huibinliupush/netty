@@ -135,7 +135,7 @@ public class ChannelOption<T> extends AbstractConstant<ChannelOption<T>> {
     @Deprecated
     public static final ChannelOption<Boolean> DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION =
             valueOf("DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION");
-
+    // 默认 true
     public static final ChannelOption<Boolean> SINGLE_EVENTEXECUTOR_PER_GROUP =
             valueOf("SINGLE_EVENTEXECUTOR_PER_GROUP");
 

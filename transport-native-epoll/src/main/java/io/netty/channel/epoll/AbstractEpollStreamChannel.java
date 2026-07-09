@@ -820,6 +820,8 @@ public abstract class AbstractEpollStreamChannel extends AbstractEpollChannel im
             } catch (Throwable t) {
                 handleReadException(pipeline, byteBuf, t, close, allocHandle);
             } finally {
+                // 如果没有读完，则封装成 runnable 提交给 event loop 继续读
+                // because of epoll ET we will not get notified again until we read everything from the socket
                 epollInFinally(config);
             }
         }

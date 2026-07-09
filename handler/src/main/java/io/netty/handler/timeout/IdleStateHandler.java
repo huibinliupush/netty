@@ -125,6 +125,8 @@ public class IdleStateHandler extends ChannelDuplexHandler {
     private boolean firstAllIdleEvent = true;
 
     private byte state; // 0 - none, 1 - initialized, 2 - destroyed
+    // channelRead 的时候设置为 true
+    // channelReadComplete 的时候设置为 false
     private boolean reading;
 
     private long lastChangeCheckTimeStamp;
@@ -489,12 +491,15 @@ public class IdleStateHandler extends ChannelDuplexHandler {
         @Override
         protected void run(ChannelHandlerContext ctx) {
             long nextDelay = readerIdleTimeNanos;
+            // channelRead 的时候设置为 true
+            // channelReadComplete 的时候设置为 false，更新 lastReadTime
             if (!reading) {
                 nextDelay -= ticksInNanos() - lastReadTime;
             }
-
+            // readerIdleTimeNanos 时间内没有读事件产生
             if (nextDelay <= 0) {
                 // Reader is idle - set a new timeout and notify the callback.
+                // read time out 之后继续添加新的ReaderIdleTimeoutTask
                 readerIdleTimeout = schedule(ctx, this, readerIdleTimeNanos, TimeUnit.NANOSECONDS);
 
                 boolean first = firstReaderIdleEvent;
@@ -507,6 +512,7 @@ public class IdleStateHandler extends ChannelDuplexHandler {
                 firstReaderIdleEvent = false;
 
                 try {
+                    // FIRST_READER_IDLE_STATE_EVENT or READER_IDLE_STATE_EVENT
                     IdleStateEvent event = newIdleStateEvent(IdleState.READER_IDLE, first);
                     channelIdle(ctx, event);
                 } catch (Throwable t) {
@@ -514,6 +520,9 @@ public class IdleStateHandler extends ChannelDuplexHandler {
                 }
             } else {
                 // reading = true : Read occurred before the timeout - set a new timeout with shorter delay.
+                // timeout 检测时间到（也就是这里的 run 方法触发），但是正在 channelRead(read = true)，
+                // 那么重新开始计算 timeout时间， nextDelay = readerIdleTimeNanos
+                // read = false , 还未到 read timeout , 那么剩余 timeout 时间就是 nextDelay， 等到 nextDelay 之后再进行检测
                 readerIdleTimeout = schedule(ctx, this, nextDelay, TimeUnit.NANOSECONDS);
             }
         }
@@ -527,13 +536,15 @@ public class IdleStateHandler extends ChannelDuplexHandler {
 
         @Override
         protected void run(ChannelHandlerContext ctx) {
-
+            // writeListener 更新 lastWriteTime
             long lastWriteTime = IdleStateHandler.this.lastWriteTime;
+            // 多久没有写事件了
             long nextDelay = writerIdleTimeNanos - (ticksInNanos() - lastWriteTime);
+            // 写空闲
             if (nextDelay <= 0) {
                 // Writer is idle - set a new timeout and notify the callback.
                 writerIdleTimeout = schedule(ctx, this, writerIdleTimeNanos, TimeUnit.NANOSECONDS);
-
+                // writeListener 设置为 true
                 boolean first = firstWriterIdleEvent;
                 firstWriterIdleEvent = false;
 
@@ -541,7 +552,7 @@ public class IdleStateHandler extends ChannelDuplexHandler {
                     if (hasOutputChanged(ctx, first)) {
                         return;
                     }
-
+                    // FIRST_WRITER_IDLE_STATE_EVENT or WRITER_IDLE_STATE_EVENT
                     IdleStateEvent event = newIdleStateEvent(IdleState.WRITER_IDLE, first);
                     channelIdle(ctx, event);
                 } catch (Throwable t) {
@@ -565,13 +576,15 @@ public class IdleStateHandler extends ChannelDuplexHandler {
 
             long nextDelay = allIdleTimeNanos;
             if (!reading) {
+                // 读，写必须全部空闲就产生 ALL_IDLE
+                // 光有一个空闲是不会产生 ALL_IDLE 事件的
                 nextDelay -= ticksInNanos() - Math.max(lastReadTime, lastWriteTime);
             }
             if (nextDelay <= 0) {
                 // Both reader and writer are idle - set a new timeout and
                 // notify the callback.
                 allIdleTimeout = schedule(ctx, this, allIdleTimeNanos, TimeUnit.NANOSECONDS);
-
+                // writeListener 以及 channelRead 都会设置 true
                 boolean first = firstAllIdleEvent;
                 firstAllIdleEvent = false;
 

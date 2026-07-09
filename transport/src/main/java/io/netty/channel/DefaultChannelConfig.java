@@ -59,7 +59,8 @@ public class DefaultChannelConfig implements ChannelConfig {
 
     //PooledByteBufAllocator
     private volatile ByteBufAllocator allocator = ByteBufAllocator.DEFAULT;
-    //用于Channel接收数据用的buffer分配器  NioServerSocketChannel对应的是AdaptiveRecvByteBufAllocator
+    //用于Channel接收数据用的buffer分配器  NioServerSocketChannel， NioSocketChannel 对应的是AdaptiveRecvByteBufAllocator
+    // 可通过对应的 ChannelOption 修改
     private volatile RecvByteBufAllocator rcvBufAllocator;
     private volatile MessageSizeEstimator msgSizeEstimator = DEFAULT_MSG_SIZE_ESTIMATOR;
 
@@ -179,6 +180,7 @@ public class DefaultChannelConfig implements ChannelConfig {
         } else if (option == ALLOCATOR) {
             setAllocator((ByteBufAllocator) value);
         } else if (option == RCVBUF_ALLOCATOR) {
+            // 默认 AdaptiveRecvByteBufAllocator
             setRecvByteBufAllocator((RecvByteBufAllocator) value);
         } else if (option == AUTO_READ) {
             setAutoRead((Boolean) value);
@@ -292,6 +294,7 @@ public class DefaultChannelConfig implements ChannelConfig {
 
     @Override
     public ChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator) {
+        // 默认 AdaptiveRecvByteBufAllocator
         rcvBufAllocator = checkNotNull(allocator, "allocator");
         return this;
     }

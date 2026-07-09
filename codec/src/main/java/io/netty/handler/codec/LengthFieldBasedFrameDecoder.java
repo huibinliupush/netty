@@ -193,8 +193,8 @@ import io.netty.channel.ChannelHandlerContext;
  * @see LengthFieldPrepender
  */
 public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
-    // 待解码 message 的最大长度
     private final ByteOrder byteOrder;
+    // 待解码 message 的最大长度
     private final int maxFrameLength;
     // 用于表示 length 字段在 buf 中的偏移
     private final int lengthFieldOffset;
@@ -202,7 +202,8 @@ public class LengthFieldBasedFrameDecoder extends ByteToMessageDecoder {
     private final int lengthFieldLength;
     // lengthFieldOffset + lengthFieldLength
     private final int lengthFieldEndOffset;
-    // 用于表示 length 字段所表示的内容，默认为 0 ， length 字段表示内容长度为其后面的字节（不包括 length 字段以及 length 字段前面的字节内容）
+    // 默认情况下，lengthField 所表示的长度为该字段后面的内容长度（lengthField 后面的内容长度）lengthAdjustment = 0
+    // lengthAdjustment 用于调节 lengthField 所表示的长度从哪里开始
     private final int lengthAdjustment;
     // 表示需要解码的内容，跳过 initialBytesToStrip 个字节开始解码，之前的字节忽略
     private final int initialBytesToStrip;

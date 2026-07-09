@@ -1582,7 +1582,8 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         @Override
         public void channelReadComplete(ChannelHandlerContext ctx) {
             ctx.fireChannelReadComplete();
-
+            //如果是autoRead 则自动触发read事件传播
+            //在read回调函数中 触发OP_ACCEPT或者OP_READ事件注册
             readIfIsAutoRead();
         }
 

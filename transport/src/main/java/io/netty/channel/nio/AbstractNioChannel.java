@@ -56,7 +56,11 @@ public abstract class AbstractNioChannel extends AbstractChannel {
     protected final int readInterestOp;
     //channel注册到Selector后获得的SelectKey
     volatile SelectionKey selectionKey;
-    boolean readPending;
+    // 在一开始 channel 监听事件的时候，doBeginRead 的时候会设置为 true
+    // channel 事件活跃读取成功之后会设置为 false, 每次读取完成都会设置 false
+    // channelReadComplete 之后如果是 autoRead, 则会触发 read 事件，doBeginRead 的时候会设置为 true
+    // 是否在等待读取数据（channelActive之后，(autoRead=true)ChannelReadComplete之后都会设置为 true）, 正在读取的时候设置 false
+    boolean readPending;// 是否在等待读取数据（channelActive之后，ChannelReadComplete之后都会设置为 true）,正在读取的时候设置 false
     private final Runnable clearReadPendingRunnable = new Runnable() {
         @Override
         public void run() {
@@ -336,6 +340,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             try {
                 boolean wasActive = isActive();
                 doFinishConnect();
+                // trySuccess connectPromise , fireChannelActive
                 fulfillConnectPromise(connectPromise, wasActive);
             } catch (Throwable t) {
                 fulfillConnectPromise(connectPromise, annotateConnectException(t, requestedRemoteAddress));
@@ -418,7 +423,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
     }
 
 
-    // channelActive 会掉这里，channelReadComplete 也会掉这里
+    // autoRead 的情况下 channelActive 会掉这里，每次 channelReadComplete 也会掉这里（都会触发 read 事件来到这里）
     @Override
     protected void doBeginRead() throws Exception {
         // Channel.read() or ChannelHandlerContext.read() was called
@@ -426,13 +431,17 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         if (!selectionKey.isValid()) {
             return;
         }
-        // readPending 在每次读取完之后（readComplete 事件之后）就会被重置为 true
+        // 在一开始 channel 监听事件的时候，doBeginRead 的时候会设置为 true
+        // channel 事件活跃读取成功之后会设置为 false, 每次读取完成都会设置 false
+        // channelReadComplete 之后如果是 autoRead, 则会触发 read 事件，doBeginRead 的时候会设置为 true
+        // 是否在等待读取数据（channelActive之后，ChannelReadComplete之后都会设置为 true）,正在读取的时候设置 false
         readPending = true;
 
         final int interestOps = selectionKey.interestOps();
         /**
          * 1：ServerSocketChannel 初始化时 readInterestOp设置的是OP_ACCEPT事件
          * 2：SocketChannel 初始化时 readInterestOp设置的是OP_READ事件
+         * 每次 channelReadComplete 时如果是 autoRead 都会掉这里，所以要加 if 判断
          * */
         if ((interestOps & readInterestOp) == 0) {
             //注册监听OP_ACCEPT或者OP_READ事件
