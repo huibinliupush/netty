@@ -86,7 +86,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     public ChannelMetadata metadata() {
         return METADATA;
     }
-
+    // 结合 closeOnRead 方法理解
     final boolean shouldBreakReadReady(ChannelConfig config) {
         return isInputShutdown0() && (inputClosedSeenErrorOnRead || !isAllowHalfClosure(config));
     }
@@ -112,7 +112,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
          * 如果客户端是调用的close方法发送的fin,则进入全关闭状态，在fin_wait2不能接受服务端的数据，直接返回rst给服务端，但服务端在close_wait状态还可以向客户端发送数据，只是客户端不在接受
          * 如果客户端调用的是shutdown方法发送fin,则进入半关闭状态，只是将发送方向的通道关闭，但还没有关闭接受通道还是可以接受服务端的数据在fin_wait2，但是这个状态是有超时时间限制的由操作系统控制
          *
-         * 这里的逻辑是服务端在收到客户端的fin并回复ack给客户端后进入close_wait状态，需要调用close方法给客户端发送fin 结束close_wait状态进行last_ack状态
+         * 这里的逻辑是服务端在收到客户端的fin并回复ack给客户端后，服务端进入close_wait状态，需要调用close方法给客户端发送fin 结束close_wait状态进行last_ack状态
          *
          * 如果进程异常退出了，内核就会发送 RST 报文来关闭，它可以不走四次挥手流程，是一个暴力关闭连接的方式。
          *
@@ -126,7 +126,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
          * */
         private void closeOnRead(ChannelPipeline pipeline) {
             //判断接收方向是否关闭，这里肯定是没有关闭的
-            if (!isInputShutdown0()) {
+            if (!isInputShutdown0()) { // 关闭读不会发送fin
                 //如果接收方向还没有关闭 继续判断是否支持半关闭（客户端可以继续接收数据但不能发送数据，服务端可以继续发送数据但不能接受数据）
                 if (isAllowHalfClosure(config())) {
                     // 如果支持半关闭，服务端这里需要首先关闭接收方向的通道，语义是不在接受新的数据，但是可以继续发送数据
@@ -258,9 +258,18 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             ByteBuf byteBuf = null;
             boolean close = false;
             try {
+                // 为什么不一次性读完，而是选择在一个 loop 中循环读取 ？
+                // 如果要一次性读完，我们在一开始是不知道到底该分配多大的 buffer, 分配大了浪费，分配小了不够
+                // 所以核心关键是要找到一个容量大小合适的尺寸，那么就只能在 read loop 中不断的试探调整最终找到一个合适的尺寸
+                // 由于每次读取都会调整 buffer 尺寸，所以别看这里是一个 read loop ，其实真正读取用不了几次 loop.
+                // read loop 在这里的意义就是寻找出一个合适的 buffer 尺寸，以后就是一次性读取。基本不会 loop
                 do {
                     //利用PooledByteBufAllocator分配合适大小的byteBuf 初始大小为2048
                     //每一轮开始读取之前 都需要为每一轮分配独立的堆外内存 不能共用
+                    //预计下一次分配buffer的容量，一开始为2048
+                    // 扩容有两个时机：
+                    // 1. 在 do while read loop 中每 read 一次都会调用 io.netty.channel.AdaptiveRecvByteBufAllocator.HandleImpl.lastBytesRead 方法判断是否对下一次 read 进行扩容（参数为每次读到的bytes）
+                    // 2. 在结束 do while read loop 之后，最后调用 io.netty.channel.AdaptiveRecvByteBufAllocator.HandleImpl.readComplete 来判断是否对下一轮 read loop 进行扩容（参数为总共读到的bytes）
                     byteBuf = allocHandle.allocate(allocator);
                     //记录本次读取了多少字节数，这里会判断是否对 byteBuf 进行扩容（面向下一次 read）但不会缩容
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
@@ -297,7 +306,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
                 if (close) {
                     //此时客户端发送fin1（fi_wait_1状态）主动关闭连接，服务端接收到fin，并回复ack进入close_wait状态
-                    //在服务端进入close_wait状态 需要调用close 方法向客户端发送fin_ack，服务端才能结束close_wait状态
+                    //在服务端进入close_wait状态之后 需要调用close 方法向客户端发送fin_ack，服务端才能结束close_wait状态
                     closeOnRead(pipeline);
                 }
             } catch (Throwable t) {
@@ -313,8 +322,10 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 // This could be for two reasons:
                 // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
                 // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
-                //
+                // 这样一来，只要触发 read 就会 beginRead ，然后设置 readPending = true
                 // See https://github.com/netty/netty/issues/2254
+                // issue 导致的问题：Calling Channel.read() within channelReadComplete() not works when AutoRead is false
+                // 所以这里要判断 !readPending
 
                 /**
                  * autoread提供一种背压机制。防止oom
@@ -328,6 +339,10 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                  *
                  * */
                 if (!readPending && !config.isAutoRead()) {
+                    // readPending = true 说明在某个地方触发了 read 事件（beginRead），那么就不能 removeReadOp
+                    // 否则就会导致 Calling Channel.read() within channelReadComplete() not works when AutoRead is false
+                    // 导致触发 read 事件仍然不可读，因为这里 removeReadOp 了，所以要判断 !readPending
+                    // 正确的语义是：即使设置了 autoRead = false, 但是触发了 read 事件，那么 channel 会变为可读，不会 removeReadOp
                     removeReadOp();
                 }
             }

@@ -60,6 +60,9 @@ public abstract class AbstractNioChannel extends AbstractChannel {
     // channel 事件活跃读取成功之后会设置为 false, 每次读取完成都会设置 false
     // channelReadComplete 之后如果是 autoRead, 则会触发 read 事件，doBeginRead 的时候会设置为 true
     // 是否在等待读取数据（channelActive之后，(autoRead=true)ChannelReadComplete之后都会设置为 true）, 正在读取的时候设置 false
+    // 表示是否正在监听事件:true 表示正在监听事件（但事件还未到来）， false 表示取消监听或者是正在处理活跃事件
+    // io.netty.channel.nio.AbstractNioChannel.clearReadPending 会设置为 false
+    // true 表示 channel 是可读的
     boolean readPending;// 是否在等待读取数据（channelActive之后，ChannelReadComplete之后都会设置为 true）,正在读取的时候设置 false
     private final Runnable clearReadPendingRunnable = new Runnable() {
         @Override

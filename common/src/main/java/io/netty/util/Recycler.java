@@ -148,6 +148,7 @@ public abstract class Recycler<T> {
         @Override
         protected void onRemoval(Stack<T> value) {
             // Let us remove the WeakOrderQueue from the WeakHashMap directly if its safe to remove some overhead
+            // 对应的线程挂掉 netty 会自动回调这里
             if (value.threadRef.get() == Thread.currentThread()) {
                if (DELAYED_RECYCLED.isSet()) {
                    DELAYED_RECYCLED.get().remove(value);

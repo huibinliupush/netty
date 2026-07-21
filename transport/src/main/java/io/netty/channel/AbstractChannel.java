@@ -53,6 +53,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     //为channel分配独立的pipeline用于IO事件编排
     private final DefaultChannelPipeline pipeline;
     //关闭channel时 传入的voidPromise
+    // It will never be notified of a success or error and so is only a placeholder for operation
     private final VoidChannelPromise unsafeVoidPromise = new VoidChannelPromise(this, false);
     //关闭channel操作的指定future，来判断关闭流程进度 每个channel一个
     private final CloseFuture closeFuture = new CloseFuture(this);
