@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadFactory;
  * Allow to retrieve the {@link EventExecutor} for the calling {@link Thread}.
  */
 public final class ThreadExecutorMap {
-
+    // 所有的 event loop executor 都会存在这里
     private static final FastThreadLocal<EventExecutor> mappings = new FastThreadLocal<EventExecutor>();
 
     private ThreadExecutorMap() { }

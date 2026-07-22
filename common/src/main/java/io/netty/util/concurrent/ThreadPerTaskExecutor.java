@@ -29,6 +29,9 @@ public final class ThreadPerTaskExecutor implements Executor {
 
     @Override
     public void execute(Runnable command) {
+        // io.netty.util.concurrent.DefaultThreadFactory.newThread(java.lang.Runnable, java.lang.String)
+        // 注意这里创建的 thread 是 FastThreadLocalThread
+        // command 会被 FastThreadLocalRunnable 包装
         threadFactory.newThread(command).start();
     }
 }

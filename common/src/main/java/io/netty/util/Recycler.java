@@ -246,7 +246,9 @@ public abstract class Recycler<T> {
     }
 
     private static final class DefaultHandle<T> extends EnhancedHandle<T> {
+        // 从对象池中获取之后的状态
         private static final int STATE_CLAIMED = 0;
+        // 回收之后的状态
         private static final int STATE_AVAILABLE = 1;
         private static final AtomicIntegerFieldUpdater<DefaultHandle<?>> STATE_UPDATER;
         static {
@@ -311,8 +313,13 @@ public abstract class Recycler<T> {
     private static final class LocalPool<T> implements MessagePassingQueue.Consumer<DefaultHandle<T>> {
         private final int ratioInterval;
         private final int chunkSize;
+        // 类似于原来的 stack
         private final ArrayDeque<DefaultHandle<T>> batch;
+        // 由原来 stack 的弱引用转为强引用
+        // BATCH_FAST_TL_ONLY = true (默认)，创建线程为 FastThreadLocalThread 才会设置，普通线程置为 null
+        // BATCH_FAST_TL_ONLY = false , 所有类型的线程都会设置
         private volatile Thread owner;
+        // 类似原来的 weakOrderQueue 链表，现在统一转为 mpsc queue，回收线程统一向这里回收对象
         private volatile MessagePassingQueue<DefaultHandle<T>> pooledHandles;
         private int ratioCounter;
 
@@ -356,10 +363,14 @@ public abstract class Recycler<T> {
 
         void release(DefaultHandle<T> handle, boolean guarded) {
             if (guarded) {
+                // 回收之后状态变为 STATE_AVAILABLE
                 handle.toAvailable();
             } else {
+                // lazySet
                 handle.unguardedToAvailable();
             }
+            // BATCH_FAST_TL_ONLY = true (默认)，创建线程为 FastThreadLocalThread 才会设置，普通线程置为 null
+            // BATCH_FAST_TL_ONLY = false , 所有类型的线程都会设置
             Thread owner = this.owner;
             if (owner != null && Thread.currentThread() == owner && batch.size() < chunkSize) {
                 // owner 自己回收线程
