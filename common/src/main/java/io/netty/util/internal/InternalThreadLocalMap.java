@@ -42,17 +42,17 @@ public final class InternalThreadLocalMap extends UnpaddedInternalThreadLocalMap
     // 每一个 Thread 内部都会绑定一个 InternalThreadLocalMap 用来存放 FastThreadLocal 变量的值
     // 对于 FastThreadLocalThread 来说，原生会绑定一个 InternalThreadLocalMap
     // 对于普通 Thread 来说，原生的是 ThreadLocalMap，存储原生的 ThreadLocal
-    // 要想存储 FastThreadLocal 变量，所以内部还需要一个原生 ThreadLocal 来绑定 InternalThreadLocalMap（每个线程绑定一个）
+    // 要想存储 FastThreadLocal 变量，所以内部还需要一个原生 ThreadLocal (这里的 slowThreadLocalMap)来绑定 InternalThreadLocalMap（每个线程绑定一个）
     private static final ThreadLocal<InternalThreadLocalMap> slowThreadLocalMap =
             new ThreadLocal<InternalThreadLocalMap>();
     // 为 InternalThreadLocalMap 中的每一个 FastThreadLocal 变量分配 index
     // 注意这里的 nextIndex 为 static 全局唯一，也就是说一个 FastThreadLocal 的 index 在各个线程中是固定的
     private static final AtomicInteger nextIndex = new AtomicInteger();
     // Internal use only.
-    // object[0] 存放 FastThreadLocal 变量的 Set 集合，set 中存放的都是已经被初始化（设置值）好的 FastThreadLocal
+    // object[VARIABLES_TO_REMOVE_INDEX] 存放 FastThreadLocal 变量的 Set 集合，set 中存放的都是已经被初始化（设置值）好的 FastThreadLocal
     // FastThreadLocal 被初始化好之后，就会被添加到这个 Set 中。
 
-    // object[0] : It's used for tracking all thread local variables created in any given thread,
+    // object[VARIABLES_TO_REMOVE_INDEX] : It's used for tracking all thread local variables created in any given thread,
     // so that a thread can bulk-remove all of its thread-local variables.
 
     // 因为 object 数组有可能很大，但是我们用到的 FastThreadLocal 变量并不多，为了跟踪到线程具体使用了哪些 FastThreadLocal

@@ -113,7 +113,8 @@ public abstract class Recycler<T> {
         protected LocalPool<T> initialValue() {
             return new LocalPool<T>(maxCapacityPerThread, interval, chunkSize);
         }
-
+        // event loop 为 FastThreadLocalThread，在其每个 runnable 任务执行结束之后会调用 FastThreadLocal.removeAll() 清理所有 FastThreadLocal
+        // see : io.netty.util.concurrent.FastThreadLocalRunnable.run
         @Override
         protected void onRemoval(LocalPool<T> value) throws Exception {
             super.onRemoval(value);

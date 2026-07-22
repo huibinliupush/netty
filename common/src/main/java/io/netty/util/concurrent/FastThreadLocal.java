@@ -59,6 +59,7 @@ public class FastThreadLocal<V> {
         try {
             // It's used for tracking all thread local variables created in any given thread,
             // so that a thread can bulk-remove all of its thread-local variables.
+            // 还没有被 remove 的 FastThreadLocal 全部保存在这里
             Object v = threadLocalMap.indexedVariable(VARIABLES_TO_REMOVE_INDEX);
             if (v != null && v != InternalThreadLocalMap.UNSET) {
                 @SuppressWarnings("unchecked")
@@ -98,11 +99,11 @@ public class FastThreadLocal<V> {
 
     @SuppressWarnings("unchecked")
     private static void addToVariablesToRemove(InternalThreadLocalMap threadLocalMap, FastThreadLocal<?> variable) {
-        // object[0]
+        // object[VARIABLES_TO_REMOVE_INDEX]
         Object v = threadLocalMap.indexedVariable(VARIABLES_TO_REMOVE_INDEX);
         Set<FastThreadLocal<?>> variablesToRemove;
         if (v == InternalThreadLocalMap.UNSET || v == null) {
-            // 当第一个 FastThreadLocal 变量值初始化好之后，第一次设置 object[0]
+            // 当第一个 FastThreadLocal 变量值初始化好之后，第一次设置 object[VARIABLES_TO_REMOVE_INDEX]
             variablesToRemove = Collections.newSetFromMap(new IdentityHashMap<FastThreadLocal<?>, Boolean>());
             threadLocalMap.setIndexedVariable(VARIABLES_TO_REMOVE_INDEX, variablesToRemove);
         } else {
@@ -199,6 +200,9 @@ public class FastThreadLocal<V> {
         }
         // 将初始化好的值设置到 InternalThreadLocalMap 中，容量不够这里会进行扩容
         threadLocalMap.setIndexedVariable(index, v);
+        // 将这里的 FastThreadLocal 加入到 object[VARIABLES_TO_REMOVE_INDEX] 中
+        // object[VARIABLES_TO_REMOVE_INDEX] : It's used for tracking all thread local variables created in any given thread,
+        // so that a thread can bulk-remove all of its thread-local variables.
         addToVariablesToRemove(threadLocalMap, this);
         return v;
     }
