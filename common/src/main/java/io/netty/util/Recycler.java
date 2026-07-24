@@ -386,6 +386,7 @@ public abstract class Recycler<T> {
                 // 其他线程会将对象放入其所属 localPool 的 MpscQueue 中（多线程回收，owner 单线程消费）
                 MessagePassingQueue<DefaultHandle<T>> handles = pooledHandles;
                 if (handles != null) {
+                    // 以提升性能为代价，牺牲对队列满/空状态的可靠保证。即使队列没有满，也可能返回 false
                     handles.relaxedOffer(handle);
                 }
             }

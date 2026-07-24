@@ -1044,6 +1044,7 @@ public final class PlatformDependent {
         }
 
         static <T> Queue<T> newChunkedMpscQueue(final int chunkSize, final int capacity) {
+            // Recycler 用的是 MpscChunkedArrayQueue 有界，chunkSize = 32 ， capacity = 4096
             return USE_MPSC_CHUNKED_ARRAY_QUEUE ? new MpscChunkedArrayQueue<T>(chunkSize, capacity)
                     : new MpscChunkedAtomicArrayQueue<T>(chunkSize, capacity);
         }
@@ -1051,6 +1052,7 @@ public final class PlatformDependent {
         static <T> Queue<T> newMpscQueue() {
             // 如果 hasUnsafe 那么 USE_MPSC_CHUNKED_ARRAY_QUEUE = true
             // MPSC_CHUNK_SIZE =  1024
+            // 时间轮以及 event loop 用的是 MpscUnboundedArrayQueue 无界
             return USE_MPSC_CHUNKED_ARRAY_QUEUE ? new MpscUnboundedArrayQueue<T>(MPSC_CHUNK_SIZE)
                                                 : new MpscUnboundedAtomicArrayQueue<T>(MPSC_CHUNK_SIZE);
         }
@@ -1061,10 +1063,10 @@ public final class PlatformDependent {
      * consumer (one thread!).
      * @return A MPSC queue which may be unbounded.
      *
-     * 时间轮中的相关队列使用无界 MpscQueue
+     * 时间轮中的相关队列使用无界 MpscUnboundedArrayQueue
      *
      * 以及 EventLoop 中的 taskQueue ， 如果 maxPendingTasks 指定为 Integer.MAX_VALUE 也是用无界 MpscQueue
-     * 否则使用 MpscChunkedArrayQueue 有界
+     * 否则使用 MpscChunkedArrayQueue 有界 (Recycler用的是有界)
      * io.netty.channel.nio.NioEventLoop#newTaskQueue0(int)
      *
      */
@@ -1076,7 +1078,7 @@ public final class PlatformDependent {
      * Create a new {@link Queue} which is safe to use for multiple producers (different threads) and a single
      * consumer (one thread!).
      *
-     * EventLoop 中的 taskQueue -> MpscChunkedArrayQueue
+     * EventLoop 中的 taskQueue -> MpscUnboundedArrayQueue
      */
     public static <T> Queue<T> newMpscQueue(final int maxCapacity) {
         return Mpsc.newMpscQueue(maxCapacity);
