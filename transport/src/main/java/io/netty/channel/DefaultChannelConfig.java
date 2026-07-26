@@ -65,6 +65,8 @@ public class DefaultChannelConfig implements ChannelConfig {
     private volatile MessageSizeEstimator msgSizeEstimator = DEFAULT_MSG_SIZE_ESTIMATOR;
 
     private volatile int connectTimeoutMillis = DEFAULT_CONNECT_TIMEOUT;
+    // 注意这里每次是允许直接一次性发送最多 1024 个 ByteBuf
+    // 最多发送 16 次，每次批量发送 1024 个 ByteBuf
     private volatile int writeSpinCount = 16;
     @SuppressWarnings("FieldMayBeFinal")
     // 背压机制，如果对端狂发数据，而服务端处理不过来，那么就设置 autoRead = false 停止读取，否则会造成 OOM

@@ -103,6 +103,7 @@ final class ChannelHandlerMask {
                 mask |= MASK_ALL_INBOUND;
 
                 //最后在对不感兴趣的事件一一排除（handler中的事件回调方法如果标注了@Skip注解，则认为handler对该事件不感兴趣）
+                // 包括 handlerType 的父类，接口一直向上查找知道找到方法 method
                 if (isSkippable(handlerType, "channelRegistered", ChannelHandlerContext.class)) {
                     mask &= ~MASK_CHANNEL_REGISTERED;
                 }

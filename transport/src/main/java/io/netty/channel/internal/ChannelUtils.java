@@ -16,6 +16,9 @@
 package io.netty.channel.internal;
 
 public final class ChannelUtils {
+    // 如果连 4K 都写不进去了，那么就缩小 MaxBytesPerGatheringWrite（控制每次 flush 从 ChannelOutboundBuffer 中获取多少发送字节）
+    // 然后每次一次性批量发送，最多发送 16 次
+    // 每次都会调整 MaxBytesPerGatheringWrite
     public static final int MAX_BYTES_PER_GATHERING_WRITE_ATTEMPTED_LOW_THRESHOLD = 4096;
     public static final int WRITE_STATUS_SNDBUF_FULL = Integer.MAX_VALUE;
 

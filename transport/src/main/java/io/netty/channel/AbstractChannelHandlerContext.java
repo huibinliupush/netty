@@ -825,6 +825,9 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
         //flush = true 表示channelHandler中调用的是writeAndFlush方法，这里需要找到pipeline中覆盖write或者flush方法的channelHandler
         //flush = false 表示调用的是write方法，只需要找到pipeline中覆盖write方法的channelHandler
+        // 这里有寻找出来的 next 有两种情况：
+        // 1 ： next 实现了 write 方法
+        // 2: next  write 方法 标注了 @skip ，但是 next executor 与当前 context executor 不同
         final AbstractChannelHandlerContext next = findContextOutbound(flush ?
                 (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
         //用于检查内存泄露
@@ -832,8 +835,9 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         //获取下一个要被执行的channelHandler指定的executor
         EventExecutor executor = next.executor();
         //确保outbound事件的执行 是由 channelHandler指定的executor执行的
-        if (executor.inEventLoop()) {
+        if (executor.inEventLoop()) { // 当前线程是否是 executor
             //如果当前线程是指定的executor 则直接操作
+            // 如果 next executor 与当前 context executor 相同，那么必定保证这里的 next 实现了 write 方法
             if (flush) {
                 next.invokeWriteAndFlush(m, promise);
             } else {
@@ -841,6 +845,9 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             }
         } else {
             //如果当前线程不是channelHandler指定的executor，则封装程异步任务 提交给指定的executor执行
+            // 如果 next executor 与当前 context executor 不同
+            // 1: next 实现了 write 方法
+            // 2： next 没有实现 write 方法（因为他们的 executor 不同，相同的话就被 findContextOutbound skip 了）
             final WriteTask task = WriteTask.newInstance(next, m, promise, flush);
             if (!safeExecute(executor, task, promise, m, !flush)) {
                 // We failed to submit the WriteTask. We need to cancel it so we decrement the pending bytes
@@ -927,7 +934,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         EventExecutor currentExecutor = executor();
         do {
             ctx = ctx.next;
-        } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_INBOUND));
+        } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_INBOUND));// MASK_ONLY_INBOUND 过滤 ChannelInbboundHandler
 
         return ctx;
     }
@@ -939,7 +946,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
         do {
             ctx = ctx.prev;
-        } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_OUTBOUND));
+        } while (skipContext(ctx, currentExecutor, mask, MASK_ONLY_OUTBOUND));// MASK_ONLY_OUTBOUND 过滤 ChannelOutboundHandler
 
         return ctx;
     }
@@ -971,12 +978,19 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private static boolean skipContext(
             AbstractChannelHandlerContext ctx, EventExecutor currentExecutor, int mask, int onlyMask) {
         // Ensure we correctly handle MASK_EXCEPTION_CAUGHT which is not included in the MASK_EXCEPTION_CAUGHT
-        return (ctx.executionMask & (onlyMask | mask)) == 0 ||
+        // 假设 onlyMask 是 MASK_ONLY_OUTBOUND
+        // 第一个条件首先要确保 ctx 是一个 ChannelOutboundHandler，不实现 mask 方法没关系，但必须实现 ChannelOutboundHandler 任意方法
+        // 如果全部没有实现则直接跳过，注意必须是全部没有实现，也就是说只要不是 ChannelOutboundHandler 直接跳过
+        // 第二个条件是 ChannelOutboundHandler 中没有实现指定的 mask 方法，按理说应该直接跳过，
+        // 但是如果当前 context 与 preContext 的 executor 不同则不能跳过，executor 相同才可以跳过
+        // 当然了只有走到第二个条件，那么它肯定是一个 ChannelOutboundHandler， 必然会有 write 方法
+        // 如果对应的 write 方法标注了 @skip 注解，那么就会从 executionMask 中取消
+        return (ctx.executionMask & (onlyMask | mask)) == 0 || // 首先必须是 ChannelOutboundHandler
                 // We can only skip if the EventExecutor is the same as otherwise we need to ensure we offload
                 // everything to preserve ordering.
                 //
                 // See https://github.com/netty/netty/issues/10067
-                (ctx.executor() == currentExecutor && (ctx.executionMask & mask) == 0);
+                (ctx.executor() == currentExecutor && (ctx.executionMask & mask) == 0); // 其次 write 方法不能标注 @skip 注解
     }
 
     @Override

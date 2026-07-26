@@ -51,6 +51,7 @@ import static java.lang.Math.min;
  * <li>{@link #getUserDefinedWritability(int)} and {@link #setUserDefinedWritability(int, boolean)}</li>
  * </ul>
  * </p>
+ * flush 会一次性批量发送 channelOutboundBuffer 中的内容
  */
 public final class ChannelOutboundBuffer {
     // Assuming a 64-bit JVM:
@@ -86,6 +87,7 @@ public final class ChannelOutboundBuffer {
     private static final FastThreadLocal<ByteBuffer[]> NIO_BUFFERS = new FastThreadLocal<ByteBuffer[]>() {
         @Override
         protected ByteBuffer[] initialValue() throws Exception {
+            // 一次 flush 最多发送 ChannelOutboundBuffer 中 1024 个 buffer
             return new ByteBuffer[1024];
         }
     };
@@ -95,6 +97,7 @@ public final class ChannelOutboundBuffer {
     // Entry(flushedEntry) --> ... Entry(unflushedEntry) --> ... Entry(tailEntry)
     //
     // The Entry that is the first in the linked-list structure that was flushed
+    // flush 会一次性批量发送 channelOutboundBuffer 中的内容
     private Entry flushedEntry;
     // The Entry which is the first unflushed in the linked-list structure
     private Entry unflushedEntry;
@@ -146,6 +149,7 @@ public final class ChannelOutboundBuffer {
         }
         tailEntry = entry;
         if (unflushedEntry == null) {
+            // flush 的时候会将 unflushedEntry 再次置为 null
             unflushedEntry = entry;
         }
 
@@ -220,6 +224,7 @@ public final class ChannelOutboundBuffer {
         }
 
         long newWriteBufferSize = TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, -size);
+        // lowWaterMark = 32K
         if (notifyWritability && newWriteBufferSize < channel.config().getWriteBufferLowWaterMark()) {
             setWritable(invokeLater);
         }
@@ -272,6 +277,8 @@ public final class ChannelOutboundBuffer {
         long progress = e.progress + amount;
         e.progress = progress;
         if (p instanceof ChannelProgressivePromise) {
+            // 通知关心写入进度的 ProgressiveListner， 只要该 Promise 没有done(success or fail)
+            // 每次发送数据之后都会通知进度 process
             ((ChannelProgressivePromise) p).tryProgress(progress, e.total);
         }
     }
@@ -350,7 +357,7 @@ public final class ChannelOutboundBuffer {
     private void removeEntry(Entry e) {
         if (-- flushed == 0) {
             // processed everything
-            flushedEntry = null;
+            flushedEntry = null; // flush 完了
             if (e == tailEntry) {
                 tailEntry = null;
                 unflushedEntry = null;
@@ -449,6 +456,7 @@ public final class ChannelOutboundBuffer {
         // 初始大小 1024
         ByteBuffer[] nioBuffers = NIO_BUFFERS.get(threadLocalMap);
         Entry entry = flushedEntry;
+        // 注意这里的 msg 必须是 ByteBuf， FileRegion 不做转换
         while (isFlushedEntry(entry) && entry.msg instanceof ByteBuf) {
             if (!entry.cancelled) {
                 ByteBuf buf = (ByteBuf) entry.msg;
@@ -476,7 +484,7 @@ public final class ChannelOutboundBuffer {
                     int count = entry.count;//初始为-1
                     if (count == -1) {
                         //noinspection ConstantValueVariableUse
-                        entry.count = count = buf.nioBufferCount();
+                        entry.count = count = buf.nioBufferCount(); // 有可能是 compositeByteBuffer, 一般都是一个
                     }
                     int neededSpace = min(maxCount, nioBufferCount + count);
                     //如果本次需要转换的nioBuffer个数超过初始值1024，就需要对nioBuffers进行扩容

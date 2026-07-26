@@ -21,6 +21,8 @@ import io.netty.util.concurrent.ProgressivePromise;
 
 /**
  * Special {@link ChannelPromise} which will be notified once the associated bytes is transferring.
+ * 每当向 socket 写入了数据就会通知 ChannelProgressivePromise， 已经写了多少，总共需要写多少
+ * 相当于是监听发送进度的一个 Promise
  */
 public interface ChannelProgressivePromise extends ProgressivePromise<Void>, ChannelProgressiveFuture, ChannelPromise {
 

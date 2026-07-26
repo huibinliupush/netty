@@ -1087,11 +1087,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             inFlush0 = true;
 
             // Mark all pending write requests as failure if the channel is inactive.
-            if (!isActive()) {
+            if (!isActive()) { // open & connected
                 try {
                     // Check if we need to generate the exception at all.
                     if (!outboundBuffer.isEmpty()) {
-                        if (isOpen()) {
+                        if (isOpen()) { // channel 还处于 open 状态，未执行 close, 但是已经 disConnected
                             //当前channel处于disConnected状态  通知promise 写入失败 并触发channelWritabilityChanged事件
                             outboundBuffer.failFlushed(new NotYetConnectedException(), true);
                         } else {
