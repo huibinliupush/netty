@@ -77,10 +77,13 @@ public final class ChannelOutboundBuffer {
     // Entry(flushedEntry) --> ... Entry(unflushedEntry) --> ... Entry(tailEntry)
     //
     // The Entry that is the first in the linked-list structure that was flushed
+    // 每当 flush 掉一个 entry,flushedEntry 向后移动
     private Entry flushedEntry;
     // The Entry which is the first unflushed in the linked-list structure
+    // 用于在 flush 的时候赋值给 flushedEntry，告知 flush 的起点
     private Entry unflushedEntry;
     // The Entry which represents the tail of the buffer
+    // 每当添加一个 entry,tailEntry 向后移动
     private Entry tailEntry;
     // The number of flushed entries that are not written yet
     private int flushed;
@@ -438,6 +441,7 @@ public final class ChannelOutboundBuffer {
         final InternalThreadLocalMap threadLocalMap = InternalThreadLocalMap.get();
         ByteBuffer[] nioBuffers = NIO_BUFFERS.get(threadLocalMap);
         Entry entry = flushedEntry;
+        // 忽略 FileRegin , 遇到 FileRegin 就暂定，FileRegin 的发送和 ByteBuf 的发送（批量）是分开处理的，不同逻辑
         while (isFlushedEntry(entry) && entry.msg instanceof ByteBuf) {
             if (!entry.cancelled) {
                 ByteBuf buf = (ByteBuf) entry.msg;
@@ -463,6 +467,7 @@ public final class ChannelOutboundBuffer {
                     int count = entry.count;
                     if (count == -1) {
                         //noinspection ConstantValueVariableUse
+                        // ByteBuf 包装的内存池中的内存，其实底层都是用 JDK ByteBuffer 引用的
                         entry.count = count = buf.nioBufferCount();
                     }
                     int neededSpace = min(maxCount, nioBufferCount + count);
@@ -475,12 +480,14 @@ public final class ChannelOutboundBuffer {
                         if (nioBuf == null) {
                             // cache ByteBuffer as it may need to create a new ByteBuffer instance if its a
                             // derived buffer
+                            // ByteBuf 包装的内存池中的内存，其实底层都是用 JDK ByteBuffer 引用的
                             entry.buf = nioBuf = buf.internalNioBuffer(readerIndex, readableBytes);
                         }
                         nioBuffers[nioBufferCount++] = nioBuf;
                     } else {
                         // The code exists in an extra method to ensure the method is not too big to inline as this
                         // branch is not very likely to get hit very frequently.
+                        // ByteBuf 包装的内存池中的内存，其实底层都是用 JDK ByteBuffer 引用的
                         nioBufferCount = nioBuffers(entry, buf, nioBuffers, nioBufferCount, maxCount);
                     }
                     if (nioBufferCount >= maxCount) {
