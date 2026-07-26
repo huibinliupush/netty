@@ -499,6 +499,9 @@ public final class ChannelOutboundBuffer {
                             // cache ByteBuffer as it may need to create a new ByteBuffer instance if its a
                             // derived buffer
                             //将netty实现的nioBuffer转换为jdk 中的 nioBuffer
+                            // netty ByteBuf 包装的内存池中的内存，其实底层都是用 JDK ByteBuffer 引用的
+                            // 一个 chunk 中一整片的内存用 JDK ByteBuffer 引用，然后分配多少 ByteBuf，从底层这个大 ByteBuffer 中切片
+                            // 所以这里需要将 ByteBuf 直接转换成 ByteBuffer，然后使用 JDK NIO 发送
                             entry.buf = nioBuf = buf.internalNioBuffer(readerIndex, readableBytes);
                         }
                         //将转换后的jdk nioBuffer 占存在 nioBuffers数组中(reactor线程本地缓存)
@@ -507,6 +510,9 @@ public final class ChannelOutboundBuffer {
                         // The code exists in an extra method to ensure the method is not too big to inline as this
                         // branch is not very likely to get hit very frequently.
                         // msg中包含多个nioBuffer（Netty实现）这里需要转为多个jdk nioBuffer
+                        // netty ByteBuf 包装的内存池中的内存，其实底层都是用 JDK ByteBuffer 引用的
+                        // 一个 chunk 中一整片的内存用 JDK ByteBuffer 引用，然后分配多少 ByteBuf，从底层这个大 ByteBuffer 中切片
+                        // 所以这里需要将 ByteBuf 直接转换成 ByteBuffer，然后使用 JDK NIO 发送
                         nioBufferCount = nioBuffers(entry, buf, nioBuffers, nioBufferCount, maxCount);
                     }
                     if (nioBufferCount >= maxCount) {
