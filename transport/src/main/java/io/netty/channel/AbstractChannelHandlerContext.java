@@ -96,8 +96,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private final DefaultChannelPipeline pipeline;
     //对应channelHandler的名称
     private final String name;
-    //false表示 当channelHandler的状态为ADD_PENDING的时候，也可以响应pipeline中的事件
-    //true表示只有在channelHandler的状态为ADD_COMPLETE的时候才能响应pipeline中的事件
+    // 当 ordered == false 时，channelHandler 的状态为 ADD_PENDING 的时候，也可以响应 pipeline 中的事件。
+    // 当 ordered == true 时，只有在 channelHandler 的状态为 ADD_COMPLETE 的时候才能响应 pipeline 中的事件
     //@see io.netty.channel.AbstractChannelHandlerContext.invokeHandler
     private final boolean ordered;
     //channelHandlerContext中保存channelHandler的执行条件掩码（是什么类型的ChannelHandler,对什么事件感兴趣）
@@ -124,6 +124,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         //channelHandlerContext中保存channelHandler的执行条件掩码（是什么类型的ChannelHandler,对什么事件感兴趣）
         this.executionMask = mask(handlerClass);
         // Its ordered if its driven by the EventLoop or the given Executor is an instanceof OrderedEventExecutor.
+        // 当 ordered == false 时，channelHandler 的状态为 ADD_PENDING 的时候，也可以响应 pipeline 中的事件。
+        // 当 ordered == true 时，只有在 channelHandler 的状态为 ADD_COMPLETE 的时候才能响应 pipeline 中的事件
         ordered = executor == null || executor instanceof OrderedEventExecutor;
     }
 
@@ -824,6 +826,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         }
 
         //flush = true 表示channelHandler中调用的是writeAndFlush方法，这里需要找到pipeline中覆盖write或者flush方法的channelHandler
+        // write , flush 方法只要实现一个 ctx.executionMask & mask 就不为 0
         //flush = false 表示调用的是write方法，只需要找到pipeline中覆盖write方法的channelHandler
         // 这里有寻找出来的 next 有两种情况：
         // 1 ： next 实现了 write 方法
@@ -1052,6 +1055,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
      */
     private boolean invokeHandler() {
         // Store in local variable to reduce volatile reads.
+        // 当 ordered == false 时，channelHandler 的状态为 ADD_PENDING 的时候，也可以响应 pipeline 中的事件。
+        // 当 ordered == true 时，只有在 channelHandler 的状态为 ADD_COMPLETE 的时候才能响应 pipeline 中的事件
         int handlerState = this.handlerState;
         return handlerState == ADD_COMPLETE || (!ordered && handlerState == ADD_PENDING);
     }

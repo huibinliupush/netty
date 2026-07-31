@@ -214,6 +214,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
     @Override
     public final ChannelPipeline addFirst(EventExecutorGroup group, String name, ChannelHandler handler) {
         final AbstractChannelHandlerContext newCtx;
+        // 这里可多线程执行，也就意味着我们在业务线程中也可以修改 pipeline
         synchronized (this) {
             checkMultiplicity(handler);
             name = filterName(name, handler);
@@ -232,7 +233,9 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             }
 
             EventExecutor executor = newCtx.executor();
+            // 当前执行线程是否为 channelHandler 指定的 EventExecutor
             if (!executor.inEventLoop()) {
+                // 必须保证 channelHandler 中的所有方法都指定的 EventExecutor 调用
                 callHandlerAddedInEventLoop(newCtx, executor);
                 return this;
             }
@@ -276,6 +279,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
     @Override
     public final ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler) {
         final AbstractChannelHandlerContext newCtx;
+        // 这里可多线程执行，也就意味着我们在业务线程中也可以修改 pipeline
         synchronized (this) {
             //是否可以重复添加channelHandler 检查同一个channelHandler实例是否允许被重复添加
             checkMultiplicity(handler);

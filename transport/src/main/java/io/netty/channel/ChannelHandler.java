@@ -179,12 +179,14 @@ public interface ChannelHandler {
 
     /**
      * Gets called after the {@link ChannelHandler} was added to the actual context and it's ready to handle events.
+     * 用于初始化 channel handler
      */
     void handlerAdded(ChannelHandlerContext ctx) throws Exception;
 
     /**
      * Gets called after the {@link ChannelHandler} was removed from the actual context and it doesn't handle events
      * anymore.
+     * 用于清理 channel handler 中的资源，比如 ByteBuf
      */
     void handlerRemoved(ChannelHandlerContext ctx) throws Exception;
 

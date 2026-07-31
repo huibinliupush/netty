@@ -176,6 +176,8 @@ public final class ChannelOutboundBuffer {
             do {
                 flushed ++;
                 //如果当前entry对应的write操作被用户取消，则释放msg，并降低channelOutboundBuffer水位线
+                // 在 flush 发送数据流程开始时，数据的发送流程就不能被取消了，在这之前我们都是可以通过 ChannelPromise 取消数据发送流程的。
+                // 所以这里需要对 ChannelOutboundBuffer 中所有 Entry 节点包裹的 ChannelPromise 设置为不可取消状态。
                 if (!entry.promise.setUncancellable()) {
                     // Was cancelled so make sure we free up memory and notify about the freed bytes
                     int pending = entry.cancel();
@@ -928,6 +930,7 @@ public final class ChannelOutboundBuffer {
             Entry entry = RECYCLER.get();
             entry.msg = msg;
             //待发数据数据大小 + entry对象大小
+            // FileRegion 这里的 size = 0 ,也就是说 FileRegion 不计算 ChannelOutboundBuffer 的水位线
             entry.pendingSize = size + CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD;
             entry.total = total;
             entry.promise = promise;

@@ -136,6 +136,27 @@ public class ChannelOption<T> extends AbstractConstant<ChannelOption<T>> {
     public static final ChannelOption<Boolean> DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION =
             valueOf("DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION");
     // 默认 true
+    /**
+     * EventExecutorGroup是netty自定义的一个线程池类型，里边包含了多个执行线程模型 EventExecutor
+     *
+     * 一个channel对应一个独立的pipeline
+     *
+     * SINGLE_EVENTEXECUTOR_PER_GROUP表示在一个channel的pipeline中，如果多个channelHandler指定了同一个EventExecutorGroup
+     * 那么这多个channelHandelr对应的EventExecutor只能绑定到EventExecutorGroup一个线程中。
+     *
+     * 比如：EventExecutorGroup中包含EventExecutor1，EventExecutor2，EventExecutor3...
+     *
+     * pipeline.addLast(EventExecutorGroup,channelHandler1)
+     * pipeline.addLast(EventExecutorGroup,channelHandler2)
+     * pipeline.addLast(EventExecutorGroup,channelHandler3)
+     *
+     * 那么在channel1中的pipeline中channelHandler1，channelHandler2，channelHandler3绑定的EventExecutor均为EventExecutorGroup中的EventExecutor1
+     * 在channel2中的pipeline中channelHandler1，channelHandler2，channelHandler3绑定的EventExecutor均为EventExecutorGroup中的EventExecutor2
+     *
+     * ........
+     *
+     * 开启SINGLE_EVENTEXECUTOR_PER_GROUP可以保证在同一个channel中，会由同一个EventExecutor执行channelHandler中的方法。前提是它们都指定了相同的EventExecutorGroup
+     * */
     public static final ChannelOption<Boolean> SINGLE_EVENTEXECUTOR_PER_GROUP =
             valueOf("SINGLE_EVENTEXECUTOR_PER_GROUP");
 
