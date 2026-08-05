@@ -56,6 +56,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     // It will never be notified of a success or error and so is only a placeholder for operation
     private final VoidChannelPromise unsafeVoidPromise = new VoidChannelPromise(this, false);
     //关闭channel操作的指定future，来判断关闭流程进度 每个channel一个
+    //channel close 的时候设置clostFuture的状态为success，表示channel已经关闭
+    //调用shutdownOutput则不会通知closeFuture
     private final CloseFuture closeFuture = new CloseFuture(this);
 
     private volatile SocketAddress localAddress;
@@ -706,6 +708,14 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
          *  @see NioEventLoop#cancel(java.nio.channels.SelectionKey)
          *  @see io.netty.channel.nio.NioEventLoop#processSelectedKey(java.nio.channels.SelectionKey, io.netty.channel.nio.AbstractNioChannel)
          */
+        // 因为 SO_LINGER 开启之后， close 会阻塞线程, 但 shutdown 不会阻塞
+        // 因为 SO_LINGER 的目的就是当进行 close 的时候，可以保证此时 socket 发送缓冲区的遗留数据可以被发送出去
+        // 因为 close 要关闭连接了，需要阻塞等到遗留数据发送出去才能进行关闭（ SO_LINGER 开启的情况）
+        // 但 shutdownOutput 并不会关闭连接，所以不需要阻塞等待，直接会返回，内核会先发送 socket 发送缓冲区的遗留数据，在发送 FIN(SO_LINGER 开启的情况)
+        // 核心就是 close 会直接关闭连接，释放资源（相关socket缓冲区），最后一次机会了，所以要阻塞等待 遗留数据 发送出去才能进行连接关闭
+        // 如果不阻塞等待，直接关闭，那么遗留数据就发送不出去嘞。因为缓冲区资源被释放了
+        // shutdownOutput 就不一样，它不会关闭连接释放资源，只是半关闭写方向，以后不会写了，所以在 shutdownOutput 之前先发送遗留数据在发送FIN
+        // 但是连接不会关闭，所以不用阻塞去等
         private void shutdownOutput(final ChannelPromise promise, Throwable cause) {
             if (!promise.setUncancellable()) {
                 return;
@@ -740,6 +750,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                             promise.setFailure(err);
                         } finally {
                             // Dispatch to the EventLoop
+                            // pipline 中的事件传播必须由 EventLoop 进行,而此时的执行线程是 GlobalEventExecutor
                             eventLoop().execute(new Runnable() {
                                 @Override
                                 public void run() {
@@ -769,6 +780,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             buffer.failFlushed(cause, false);
             //循环清理channelOutboundBuffer中的unflushedEntry
             buffer.close(cause, true);
+            // 注意半关闭shutdownOutput不会将channel从reactor上deRegister，也就是说不会清理selectionKey，close方法会清理
             pipeline.fireUserEventTriggered(ChannelOutputShutdownEvent.INSTANCE);
         }
 
@@ -825,10 +837,22 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         try {
                             // Execute the close.
                             // 在GlobalEventExecutor中执行channel的关闭任务,设置closeFuture,promise success
+                            // 注意这里的关闭channel操作是在 GlobalEventExecutor 中进行而不是在 event loop 中
+                            // 因为 SO_LINGER 开启之后， close 会阻塞线程, 但 shutdown 不会阻塞
+                            // 因为 SO_LINGER 的目的就是当进行 close 的时候，可以保证此时 socket 发送缓冲区的遗留数据可以被发送出去
+                            // 因为 close 要关闭连接了，需要阻塞等到遗留数据发送出去才能进行关闭（ SO_LINGER 开启的情况）
+                            // 但 shutdownOutput 并不会关闭连接，所以不需要阻塞等待，直接会返回，内核会先发送 socket 发送缓冲区的遗留数据，在发送 FIN(SO_LINGER 开启的情况)
+                            // 核心就是 close 会直接关闭连接，释放资源（相关socket缓冲区），最后一次机会了，所以要阻塞等待 遗留数据 发送出去才能进行连接关闭
+                            // 如果不阻塞等待，直接关闭，那么遗留数据就发送不出去嘞。因为缓冲区资源被释放了
+                            // shutdownOutput 就不一样，它不会关闭连接释放资源，只是半关闭写方向，以后不会写了，所以在 shutdownOutput 之前先发送遗留数据在发送FIN
+                            // 但是连接不会关闭，所以不用阻塞去等
                             doClose0(promise);
                         } finally {
                             // Call invokeLater so closeAndDeregister is executed in the EventLoop again!
                             // reactor线程中执行
+                            // GlobalEventExecutor 执行阻塞的 close 操作（开启 SO_LINGER）
+                            // 但是 pipeline 相关的 InactiveAndDeregiste 事件仍然需要由 event loop 执行
+                            // pipline 中的事件传播必须由 EventLoop 进行,而此时的执行线程是 GlobalEventExecutor
                             invokeLater(new Runnable() {
                                 @Override
                                 public void run() {
@@ -836,8 +860,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                                         // Fail all the queued messages
                                         // cause = closeCause = ClosedChannelException, notify = false
                                         // 此时channel已经关闭，需要清理对应channelOutboundBuffer中的待发送数据flushedEntry
+                                        // 清理 flushedEntry 到 tail 之间正在准备 flush 的消息
                                         outboundBuffer.failFlushed(cause, notify);
                                         //循环清理channelOutboundBuffer中的unflushedEntry
+                                        // 清理 unflushedEntry 到 tail 之间 write 进来的消息
                                         outboundBuffer.close(closeCause);
                                     }
                                     //这里的active = true
@@ -876,6 +902,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         private void doClose0(ChannelPromise promise) {
             try {
+                // fail channel connect promise
                 //关闭channel，此时服务端向客户端发送fin2，服务端进入last_ack状态，客户端收到fin2进入time_wait状态
                 doClose();
                 //设置clostFuture的状态为success，表示channel已经关闭
@@ -1189,7 +1216,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         }
 
         /**
-         * 用于在outbound回调中触发inbound回调，比如close中触发inActive 需要延后触发
+         * 用于在outbound回调中触发inbound回调，比如close中触发 doDeregister，inActive 需要延后触发
          * 因为outbound回调有可能又是在inbound中触发的
          * 比如这里是在 bind 回调中触发 channelActive
          * */

@@ -120,14 +120,17 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
          * shutdown 参数须传入 SHUTWR（关闭写） 或者 SHUTRDWR（同时关闭读写） 才会发送 FIN）。关闭读不会发送fin
          *
          * 这里无论服务端还是客户端在收到fin的时候 在支持半关闭的情况下，首先都需要shutdwon input
-         *
+         * 客户端和服务端同时 AllowHalfClosure 的情况下
          * 1:客户端shutdownOutput 发送fin 到服务端。服务端回复ack后，会触发read事件走到这里，首先需要shutdownInput。随后调用close或者shutdownOutput结束close_wait状态
          * 2:服务端调用close或者shutdownOutput结束close_wait状态后，客户端会收到服务端的fin，客户端触发read事件走到这里，shutdownInput
+         *
+         * 正常半关闭的设置：客户端直接调用 shutdownOutput 就可以，无需设置 AllowHalfClosure，但服务端需要设置 AllowHalfClosure
          * */
         private void closeOnRead(ChannelPipeline pipeline) {
             //判断接收方向是否关闭，这里肯定是没有关闭的
             if (!isInputShutdown0()) { // 关闭读不会发送fin
                 //如果接收方向还没有关闭 继续判断是否支持半关闭（客户端可以继续接收数据但不能发送数据，服务端可以继续发送数据但不能接受数据）
+                // 半关闭的设置： 客户端直接调用 shutdownOutput 就可以，无需设置 AllowHalfClosure，但服务端需要设置 AllowHalfClosure
                 if (isAllowHalfClosure(config())) {
                     // 如果支持半关闭，服务端这里需要首先关闭接收方向的通道，语义是不在接受新的数据，但是可以继续发送数据
                     // 注意调用shutdownInput后channel不会关闭，只是说服务端在close_wait状态还可以继续发送数据，但不能接收数据，但状态还是close_wait状态
@@ -195,7 +198,9 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 closeOnRead(pipeline);
             }
         }
-
+        // 这段代码在 TCP 连接关闭时对应的状态
+        // 1 : 对于客户端来说，这里对应 FIN_WAIT2 (客户端如果 shutdownOutput 之后，服务端 CLOSE_WAIT 下调用 close , 客户端会走到这里进行 close ,结束 FIN_WAIT2)
+        // 2 : 对于服务端来说，这里对应 CLOSE_WAIT
         @Override
         public final void read() {
             final ChannelConfig config = config();
@@ -214,7 +219,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                  * 此时socket上的read事件活跃，epoll会通知。但是这里需要注意在这种因为对端关闭连接触发的read事件，epoll会一直通知，也就是说
                  * 这里的read方法会一直不断的执行，空转。直到服务端执行close结束close_wait装填
                  *
-                 * close方法不会出现空转的原因是，调用jdk底层的close，会将channel对应的selectionkey从selector上cancel掉，所以
+                 * close方法不会出现空转的原因是，调用jdk底层的close，netty 会将channel对应的selectionkey从selector上cancel掉，所以
                  * 调用close方法关闭的channel不会一直被通知read事件活跃。
                  *
                  * 而调用shutdownOutput进行半关闭的channel就会一直空转，因为调用jdk底层shutdownOutput方法，不会cancel对应的selectionKey
@@ -316,6 +321,8 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 //  但还未被对端应用程序处理的数据被对端无条件丢弃，对端应用程序可能出现异常
                 //https://jiroujuan.wordpress.com/2013/09/05/rst-and-exceptions-when-closing-socket-in-java/
                 //https://www.mianshigee.com/note/detail/105368qmn/
+                // see rst test : io.netty.testsuite.transport.socket.SocketRstTest.testSoLingerZeroCausesOnlyRstOnClose(io.netty.bootstrap.ServerBootstrap, io.netty.bootstrap.Bootstrap)
+                // 读取 rst 会抛出异常
                 handleReadException(pipeline, byteBuf, t, close, allocHandle);
             } finally {
                 // Check if there is a readPending which was not processed yet.
@@ -343,6 +350,9 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     // 否则就会导致 Calling Channel.read() within channelReadComplete() not works when AutoRead is false
                     // 导致触发 read 事件仍然不可读，因为这里 removeReadOp 了，所以要判断 !readPending
                     // 正确的语义是：即使设置了 autoRead = false, 但是触发了 read 事件，那么 channel 会变为可读，不会 removeReadOp
+                    // 示例： 首先触发 setAutoRead = false , 那么 removeReadOp，设置 readPending = false
+                    // 随后出发 channel.read ，重新注册 ReadOp，设置 readPending = true
+                    // 只要 readPending = true 就不能 removeReadOp
                     removeReadOp();
                 }
             }

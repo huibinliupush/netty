@@ -188,6 +188,14 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
      * */
     @Override
     public ChannelFuture shutdownOutput() {
+        // 因为 SO_LINGER 开启之后， close 会阻塞线程, 但 shutdown 不会阻塞
+        // 因为 SO_LINGER 的目的就是当进行 close 的时候，可以保证此时 socket 发送缓冲区的遗留数据可以被发送出去
+        // 因为 close 要关闭连接了，需要阻塞等到遗留数据发送出去才能进行关闭（ SO_LINGER 开启的情况）
+        // 但 shutdownOutput 并不会关闭连接，所以不需要阻塞等待，直接会返回，内核会先发送 socket 发送缓冲区的遗留数据，在发送 FIN(SO_LINGER 开启的情况)
+        // 核心就是 close 会直接关闭连接，释放资源（相关socket缓冲区），最后一次机会了，所以要阻塞等待 遗留数据 发送出去才能进行连接关闭
+        // 如果不阻塞等待，直接关闭，那么遗留数据就发送不出去嘞。因为缓冲区资源被释放了
+        // shutdownOutput 就不一样，它不会关闭连接释放资源，只是半关闭写方向，以后不会写了，所以在 shutdownOutput 之前先发送遗留数据在发送FIN
+        // 但是连接不会关闭，所以不用阻塞去等
         return shutdownOutput(newPromise());
     }
 
@@ -647,6 +655,18 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                      * 设置了SO_LINGER,不管是阻塞socket还是非阻塞socket，在关闭的时候都会发生阻塞，所以这里不能使用Reactor线程来
                      * 执行关闭任务，否则Reactor线程就会被阻塞。
                      * */
+                    // 因为 SO_LINGER 开启之后， close 会阻塞线程, 但 shutdown 不会阻塞
+                    // 因为 SO_LINGER 的目的就是当进行 close 的时候，可以保证此时 socket 发送缓冲区的遗留数据可以被发送出去
+                    // 因为 close 要关闭连接了，需要阻塞等到遗留数据发送出去才能进行关闭（ SO_LINGER 开启的情况）
+                    // 但 shutdownOutput 并不会关闭连接，所以不需要阻塞等待，直接会返回，内核会先发送 socket 发送缓冲区的遗留数据，在发送 FIN(SO_LINGER 开启的情况)
+                    // 核心就是 close 会直接关闭连接，释放资源（相关socket缓冲区），最后一次机会了，所以要阻塞等待 遗留数据 发送出去才能进行连接关闭
+                    // 如果不阻塞等待，直接关闭，那么遗留数据就发送不出去嘞。因为缓冲区资源被释放了
+                    // shutdownOutput 就不一样，它不会关闭连接释放资源，只是半关闭写方向，以后不会写了，所以在 shutdownOutput 之前先发送遗留数据在发送FIN
+                    // 但是连接不会关闭，所以不用阻塞去等
+
+                    // 当 Socket 发送缓冲区的数据全部发送出去，并等到对端 ACK 后，close 方法返回。
+                    // 不开启 SO_LINGER，内核也会发送缓冲区的数据，但是不会等对端 ACK
+                    // 应用程序在 close 方法上的阻塞时间到达 l_linger 设置的值后，close 方法返回。
                     return GlobalEventExecutor.INSTANCE;
                 }
             } catch (Throwable ignore) {

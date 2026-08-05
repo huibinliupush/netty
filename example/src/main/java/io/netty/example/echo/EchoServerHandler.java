@@ -101,6 +101,8 @@ public class EchoServerHandler extends ChannelInboundHandlerAdapter {
         //半关闭
         sc.shutdownOutput();
 
+        ((SocketChannel) ctx.channel()).shutdownOutput();
+
         NioEventLoop reactor = (NioEventLoop) ctx.channel().eventLoop();
         reactor.addShutdownHook(new Runnable() {
             @Override
