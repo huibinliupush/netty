@@ -59,10 +59,13 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     private static final int ST_NOT_STARTED = 1;
     private static final int ST_STARTED = 2;
     //准备正在进行优雅关闭，此时用户仍然可以提交任务，Reactor仍可以执行任务
+    // 静默期的状态为 ST_SHUTTING_DOWN
     private static final int ST_SHUTTING_DOWN = 3;
     //已经关闭状态，优雅关闭结束，此时用户不能在提交任务，Reactor最后一次执行剩余的任务
+    // 静默期结束，状态变为 ST_SHUTDOWN
     private static final int ST_SHUTDOWN = 4;
     //Reactor中的任务已被全部执行完毕，且不在接受新的任务，真正的终止状态
+    // ST_SHUTDOWN 状态下最后一次执行 task（confirmShutdown） , 关闭 selector, remove all FastThreadLocal 之后状态变为 ST_TERMINATED
     private static final int ST_TERMINATED = 5;
 
     private static final Runnable NOOP_TASK = new Runnable() {
@@ -704,6 +707,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                         wakeup = false;
                 }
             }
+            // 一旦状态变为 ST_SHUTTING_DOWN， run 方法就会检测到，从而执行关闭逻辑
             if (STATE_UPDATER.compareAndSet(this, oldState, newState)) {
                 break;
             }
@@ -826,6 +830,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
 
         //这里判断只要有task任务需要执行就不能关闭
+        // runAllTasks 不算 WAKEUP_TASK，如果队列里是 WAKEUP_TASK，那么返回值是 false
         if (runAllTasks() || runShutdownHooks()) {
             if (isShutdown()) {
                 // Executor shut down - no new tasks anymore.
@@ -847,7 +852,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             }
             //避免Reactor在Selector上阻塞，因为此时已经不会再去处理IO事件了，专心处理关闭流程
             taskQueue.offer(WAKEUP_TASK);
-            return false;
+            return false; // 只要有任务就不能 shut down
         }
 
         //此时Reactor中已经没有任务可执行了，是时候考虑关闭的事情了
@@ -875,7 +880,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 // Ignore
             }
 
-            return false;
+            return false; // 还在静默期中，不能 shut down
         }
 
         // 在整个gracefulShutdownQuietPeriod期间内没有任务需要执行或者静默期结束 则无需等待gracefulShutdownTimeout超时，直接关闭
