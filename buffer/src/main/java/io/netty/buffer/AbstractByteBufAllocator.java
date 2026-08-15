@@ -267,6 +267,13 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
         if (minNewCapacity > threshold) {
             // 计算扩容基准线。
             // 要求必须是 CALCULATE_THRESHOLD 的最小倍数，而且必须要小于等于 minNewCapacity
+            // 它的作用是将 minNewCapacity 向下对齐到 threshold 的整数倍。
+            // 简单来说：它计算的是“不超过 minNewCapacity 的最大 threshold 的倍数”。
+            // 如果 minNewCapacity 和 threshold 都是很大的数（接近 Integer.MAX_VALUE），
+            // 相乘 (minNewCapacity / threshold) * threshold 虽然理论上不会溢出（因为先除后乘，结果不超过原值），
+            // 但若写法不当变成 minNewCapacity * threshold / threshold，则中间结果会溢出，导致计算出错。
+            // 看到 a / b * b 这种写法，你可以直接认定：把 a 向下舍入到 b 的倍数
+            // 看到 (a + b - 1) / b * b，那就是向上取整到 b 的倍数（即分配足够容纳 a 的最少整块）
             int newCapacity = minNewCapacity / threshold * threshold;
             if (newCapacity > maxCapacity - threshold) {
                 newCapacity = maxCapacity;

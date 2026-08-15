@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
 /**
  * Abstract base class for {@link ByteBuf} implementations that wrap another
  * {@link ByteBuf}.
- *
+ * 用于 slice , duplicate ByteBuf 包装原生 ByteBuf, 共用同一引用计数
  * @deprecated Do not use.
  */
 @Deprecated

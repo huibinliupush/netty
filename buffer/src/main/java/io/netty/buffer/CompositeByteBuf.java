@@ -1956,8 +1956,12 @@ public class CompositeByteBuf extends AbstractReferenceCountedByteBuf implements
         }
 
         void reposition(int newOffset) {
+            // offset move 了多少
             int move = newOffset - offset;
+            // 那么 endOffset 自然也就跟着 move 多少
             endOffset += move;
+            // 逻辑 offset 增加了多少，那么 adjustment 就应该相应减少多少
+            // 因为要保证 offset + adjustment = srcBufIndex（index一直不会变的）
             srcAdjustment -= move;
             adjustment -= move;
             offset = newOffset;

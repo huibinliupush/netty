@@ -184,7 +184,7 @@ public final class UnpooledByteBufAllocator extends AbstractByteBufAllocator imp
                 UnpooledByteBufAllocator alloc, int initialCapacity, int maxCapacity) {
             super(alloc, initialCapacity, maxCapacity);
         }
-
+        // 为该 InstrumentedUnpooledUnsafeNoCleanerDirectByteBuf 分配内存的时候会回调这里
         @Override
         protected ByteBuffer allocateDirect(int initialCapacity) {
             ByteBuffer buffer = super.allocateDirect(initialCapacity);

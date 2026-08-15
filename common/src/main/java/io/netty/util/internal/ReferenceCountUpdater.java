@@ -105,7 +105,7 @@ public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
 
         // The "real" ref count is > 0 if the rawCnt is even.
         // 如果 rawCnt 是偶数，那么表示 realRefCnt 大于 0 则返回 true
-        // 如果 rawCnt 是偶数, 则表示 realRefCnt 等于 0，返回 false
+        // 如果 rawCnt 是奇数, 则表示 realRefCnt 等于 0，返回 false
         return rawCnt == 2 || rawCnt == 4 || rawCnt == 6 || rawCnt == 8 || (rawCnt & 1) == 0;
     }
 
