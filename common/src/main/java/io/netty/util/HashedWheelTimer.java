@@ -663,6 +663,10 @@ public class HashedWheelTimer implements Timer {
             for (;;) {
                 // 当前时间戳应该减去 startTime，时间戳的参考坐标系均以时间轮的启动时间 startTime 为起点
                 // 比如当前时间戳 currentTime， deadline 时间戳
+                // 上一轮 workerThread 执行延时任务用时久，那么这里的 currentTime 的值就会比较大
+                // deadline - currentTime 就比较小，workerThread 就少睡一会
+                // 上一轮 workerThread 执行延时任务用时少，那么这里的 currentTime 的值就会比较小
+                // deadline - currentTime 就比较大，workerThread 就多睡一会
                 final long currentTime = System.nanoTime() - startTime;
                 // tickDuration 越小，时间轮的精度越高，同时 Worker 的繁忙程度也越高,如果 tickDuration 设置的过小，那么 worker 这里就会被频繁的唤醒
                 // 这里需要保证 worker 至少要 sleep 1ms ，防止 worker 被频繁的唤醒，tickDuration 的最小值也是 1ms , 默认 100ms

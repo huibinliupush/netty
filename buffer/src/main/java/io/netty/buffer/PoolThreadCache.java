@@ -367,6 +367,8 @@ final class PoolThreadCache {
             // DEFAULT_SMALL_CACHE_SIZE 默认 256
             // 表示每一个 MemoryRegionCache 中，queue 中可以缓存的内存块个数
             this.size = MathUtil.safeFindNextPositivePowerOfTwo(size);
+            // 多线程释放内存类似对象池中的多线程回收对象
+            // 都需要将内存释放回申请线程的 thread cache 中，所以都需要用到 mpsc
             queue = PlatformDependent.newFixedMpscQueue(this.size);
             this.sizeClass = sizeClass;
         }
